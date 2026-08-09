@@ -96,25 +96,76 @@ class PolyFXShadersMod extends PolyMod {
     // uppercase-letter name through PML's own real getFromPolyTrack to find
     // whichever one actually holds the render call. Wrapped so it can never
     // throw, and logs to console regardless of outcome.
+    // Round 2: brute-forcing every single/double uppercase-letter bare name
+    // came back empty — the render class isn't reachable as a simple
+    // identifier from wherever getFromPolyTrack's eval() runs at all, not
+    // just under a colliding name. This scope DOES have a webpack-style
+    // require function reachable as "i" (confirmed separately: i.n() calls
+    // nearby are the classic webpack ESM-interop helper) — introspect it
+    // directly to find its actual module cache property name (varies by
+    // config/version), then search every cached module's exports for the
+    // render call, plus a bounded fallback search from `window`. Passed as
+    // one big expression string since getFromPolyTrack is exactly `eval`.
     try {
       const marker = MIXIN_TOKENS.renderTokenStart;
-      const candidates = [];
-      for (let c = 65; c <= 90; c++) candidates.push(String.fromCharCode(c));
-      for (let c1 = 65; c1 <= 90; c1++) for (let c2 = 65; c2 <= 90; c2++) candidates.push(String.fromCharCode(c1) + String.fromCharCode(c2));
-      const found = [];
-      for (const name of candidates) {
-        try {
-          const obj = pml.getFromPolyTrack(name);
+      const probe = `(function(){
+        const marker = ${JSON.stringify(marker)};
+        const out = { iProps: null, cacheProp: null, cacheSize: null, matches: [], windowMatches: [] };
+        function isMatch(obj) {
           const upd = obj && obj.prototype && obj.prototype.update;
-          if (typeof upd === 'function') {
-            const src = upd.toString();
-            if (src.includes(marker)) found.push(name);
+          return typeof upd === 'function' && upd.toString().includes(marker);
+        }
+        try {
+          if (typeof i === 'function') {
+            out.iProps = Object.getOwnPropertyNames(i);
+            for (const propName of out.iProps) {
+              let val;
+              try { val = i[propName]; } catch (e) { continue; }
+              if (!val || typeof val !== 'object') continue;
+              const keys = Object.keys(val);
+              if (keys.length < 5 || keys.length > 5000) continue; // heuristic: a module cache, not something tiny/huge
+              out.cacheProp = propName;
+              out.cacheSize = keys.length;
+              for (const k of keys) {
+                try {
+                  const entry = val[k];
+                  const candidates = [entry, entry && entry.exports, entry && entry.exports && entry.exports.default];
+                  for (const c of candidates) {
+                    if (isMatch(c)) { out.matches.push({ cacheProp: propName, moduleKey: k }); }
+                    if (c && typeof c === 'object') {
+                      for (const ek of Object.keys(c)) {
+                        try { if (isMatch(c[ek])) out.matches.push({ cacheProp: propName, moduleKey: k, exportKey: ek }); } catch (e) {}
+                      }
+                    }
+                  }
+                } catch (e) {}
+              }
+              if (out.matches.length) break;
+            }
           }
-        } catch (_) { /* not reachable under this name from here */ }
-      }
-      console.log('[PolyFX diag] correct scope name(s) found:', JSON.stringify(found));
+        } catch (e) { out.iError = String(e); }
+        try {
+          if (!out.matches.length) {
+            const seen = new Set(); let visited = 0;
+            (function search(obj, path, depth) {
+              if (!obj || depth > 3 || visited > 20000 || seen.has(obj)) return;
+              seen.add(obj); visited++;
+              if (isMatch(obj)) { out.windowMatches.push(path); return; }
+              let keys; try { keys = Object.keys(obj); } catch (e) { return; }
+              for (const k of keys) {
+                if (visited > 20000) return;
+                let v; try { v = obj[k]; } catch (e) { continue; }
+                if (v && (typeof v === 'object' || typeof v === 'function')) search(v, path + '.' + k, depth + 1);
+              }
+            })(window, 'window', 0);
+          }
+        } catch (e) { out.windowError = String(e); }
+        return JSON.stringify(out);
+      })()`;
+      const result = pml.getFromPolyTrack(probe);
+      console.log('[PolyFX diag v2]', result);
     } catch (e) {
-      console.error('[PolyFX diag] scan itself failed:', e);
+      console.error('[PolyFX diag v2] scan itself failed:', e);
     }
     // --- END TEMPORARY DIAGNOSTIC ---
 
