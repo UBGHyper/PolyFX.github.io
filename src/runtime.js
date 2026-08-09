@@ -453,18 +453,7 @@ class PolyFX {
     }, true);
   }
 
-  // stockRender: optional (renderer, scene, camera) => void, used instead of
-  // renderer.render(scene, camera) for every stock-passthrough path below.
-  // The PML flavor patches WebGLRenderer.prototype.render itself (see
-  // src/main.mod.js) to reach this function at all, so calling
-  // renderer.render(...) here would recurse right back into that same patch.
-  // stockRender lets it pass the pre-patch original through instead. The dev
-  // flavor (direct bundle patch, no prototype patching involved) never
-  // passes one, so this falls back to the plain call — behavior unchanged
-  // there.
-  render(renderer, scene, camera, settings, sunDir, stockRender) {
-    const doStockRender = () => (stockRender ? stockRender.call(renderer, scene, camera) : renderer.render(scene, camera));
-
+  render(renderer, scene, camera, settings, sunDir) {
     // Always tracked, even when the composer is bypassed — otherwise the perf
     // guard could never observe recovered frame time and un-bypass itself.
     this._trackFrameTime();
@@ -477,7 +466,7 @@ class PolyFX {
       if (this.sky && this.skyActive) { this.skyActive = false; try { this.sky.setState(false); this.sky._deactivate(scene); } catch (_) {} }
       if (this.carLights) this.carLights.disableAll();
       if (this.underglow) this.underglow.setEnabled(false);
-      doStockRender();
+      renderer.render(scene, camera);
       return;
     }
 
@@ -496,7 +485,7 @@ class PolyFX {
       if (this.sky && this.skyActive) { this.skyActive = false; try { this.sky.setState(false); this.sky._deactivate(scene); } catch (_) {} }
       if (this.carLights) this.carLights.disableAll();
       if (this.underglow) this.underglow.setEnabled(false);
-      doStockRender();
+      renderer.render(scene, camera);
       return;
     }
 
@@ -585,7 +574,7 @@ class PolyFX {
       if (this.photo) this.photo.capture(renderer);
     } catch (err) {
       if (!this.warned) { console.error('[PolyFX] failed, using direct render:', err); this.warned = true; }
-      doStockRender();
+      renderer.render(scene, camera);
     }
   }
 

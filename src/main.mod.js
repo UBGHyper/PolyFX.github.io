@@ -73,6 +73,13 @@
 // frames, confirms one-time discovery, confirms the global patch is fully
 // removed afterward, confirms unrelated WeakMaps are unaffected).
 //
+// installRenderPatch's own wrapper needs a reentrancy guard for a separate
+// reason: window.__PolyFX.render's post-processing pipeline calls
+// renderer.render(...) again internally as part of running its own passes
+// (the composer's render pass draws through the very renderer whose
+// .render we just replaced) — without the guard that inner call re-enters
+// the wrapper and recurses into window.__PolyFX.render forever.
+//
 // The dev flavor (tools/game-bundle.mjs's patchBundle, used by
 // app_src/main.bundle.js for `npm run dev` / `npm run shots`) doesn't have
 // any of this trouble — it edits the bundle's source TEXT once, before the
@@ -139,18 +146,25 @@ class PolyFXShadersMod extends PolyMod {
 
       function installRenderPatch(renderer) {
         const originalRender = renderer.render;
-        // Passing originalRender through as stockRender (rather than
-        // letting runtime.js call renderer.render(...) itself) is required,
-        // not just tidy: renderer.render IS this very wrapper once
-        // installed, so a stock-passthrough path inside
-        // window.__PolyFX.render that called it directly would recurse into
-        // itself.
+        // Reentrancy guard: window.__PolyFX.render's own post-processing
+        // pipeline (this.composer.render()) calls renderer.render(...)
+        // again internally as part of running its passes — the exact same
+        // renderer instance whose .render we've just replaced, so that
+        // inner call would otherwise re-enter this wrapper and recurse into
+        // window.__PolyFX.render forever. inRender being true means we're
+        // already inside our own dispatch, so fall straight through to the
+        // real render instead of routing through PolyFX again.
+        let inRender = false;
         renderer.render = function (scene, camera) {
-          if (window.__PolyFX) {
-            window.__PolyFX.render(this, scene, camera, undefined, lastSunDir, originalRender);
-            return;
+          if (inRender || !window.__PolyFX) {
+            return originalRender.call(this, scene, camera);
           }
-          return originalRender.call(this, scene, camera);
+          inRender = true;
+          try {
+            window.__PolyFX.render(this, scene, camera, undefined, lastSunDir);
+          } finally {
+            inRender = false;
+          }
         };
       }
 
