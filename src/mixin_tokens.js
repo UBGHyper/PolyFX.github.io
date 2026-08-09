@@ -37,14 +37,3 @@ export const RENDERER_ACCESS = {
   moduleId: 1507,
   exportName: 'A',
 };
-
-// Same idea, for the vendored three.js WebGLRenderer class ("Gt" in the
-// 0.6.2 bundle, exported directly as "JeP" — no alias indirection). Reached
-// the same way: `i(9437).JeP`. main.mod.js patches THIS class's own
-// .prototype.render directly (a normal, closure-safe library class, unlike
-// V.prototype.update) instead of trying to reconstruct V's method — see
-// tools/game-bundle.mjs's findThreeRendererAccessPath.
-export const THREE_RENDERER_ACCESS = {
-  moduleId: 9437,
-  exportName: 'JeP',
-};

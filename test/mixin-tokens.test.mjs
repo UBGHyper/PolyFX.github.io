@@ -6,14 +6,17 @@
 //     PolyModLoader involved). It edits the bundle's source TEXT once,
 //     before the file is ever loaded, so the patched code keeps its
 //     original closure naturally.
-//   - RENDERER_ACCESS / THREE_RENDERER_ACCESS (also tested below) is used by
-//     the real PML flavor (src/main.mod.js), which reaches both classes via
-//     the shared webpack require function instead of PolyModLoader's own
+//   - RENDERER_ACCESS (also tested below) is used by the real PML flavor
+//     (src/main.mod.js), which reaches the renderer class via the shared
+//     webpack require function instead of PolyModLoader's own
 //     registerClassMixin — see that file's header comment for why
 //     registerClassMixin can't be used here at all (it reconstructs the
 //     target method via toString()+eval(), which silently detaches it from
 //     its own module's closure — private-field WeakMap access throws at
-//     runtime, not at mixin-registration time).
+//     runtime, not at mixin-registration time). The actual renderer object
+//     underneath (needed for window.__PolyFX.render(...)) is found at
+//     runtime instead, via WeakMap.prototype.get — not statically pinned,
+//     so there's nothing further to guard here for that part.
 //
 // Two distinct bugs happened with MIXIN_TOKENS specifically while building
 // this, and simulatePmlMixins is written to catch both classes even though
@@ -37,8 +40,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
-import { extractAsar, verifyMixinTokens, simulatePmlMixins, findRendererAccessPath, findThreeRendererAccessPath, root } from '../tools/game-bundle.mjs';
-import { RENDERER_ACCESS, THREE_RENDERER_ACCESS } from '../src/mixin_tokens.js';
+import { extractAsar, verifyMixinTokens, simulatePmlMixins, findRendererAccessPath, root } from '../tools/game-bundle.mjs';
+import { RENDERER_ACCESS } from '../src/mixin_tokens.js';
 
 const asarPath = path.join(root, 'extracted', 'resources', 'app.asar');
 const tmpDir = path.join(root, 'test', '.tmp-pristine-bundle');
@@ -72,7 +75,7 @@ test('MIXIN_TOKENS (dev-flavor patch) exist, are correctly scoped, and produce v
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-test('RENDERER_ACCESS and THREE_RENDERER_ACCESS (webpack module id + export name) match the pristine bundle', async (t) => {
+test('RENDERER_ACCESS (webpack module id + export name) matches the pristine bundle', async (t) => {
   if (!fs.existsSync(asarPath)) {
     t.skip(`no local app.asar at ${asarPath} — see README's local dev setup to run this test`);
     return;
@@ -81,19 +84,15 @@ test('RENDERER_ACCESS and THREE_RENDERER_ACCESS (webpack module id + export name
   await extractAsar(asarPath, tmpDir);
   const bundleText = fs.readFileSync(path.join(tmpDir, 'main.bundle.js'), 'utf8');
 
-  // main.mod.js can't reach either class via a bare identifier — both are
-  // declared in their own isolated webpack module closures (see
-  // mixin_tokens.js). It reaches them instead via `i(<moduleId>).<exportName>`,
+  // main.mod.js can't reach the renderer class via a bare identifier — it's
+  // declared in its own isolated webpack module closure (see
+  // mixin_tokens.js). It reaches it instead via `i(<moduleId>).<exportName>`,
   // using the shared webpack require function confirmed reachable from
-  // PolyModLoader's own eval() scope. If a game update reshuffles module ids
-  // or export names, this must fail loudly instead of silently mis-resolving.
-  const foundRenderer = findRendererAccessPath(bundleText);
-  assert.equal(foundRenderer.moduleId, RENDERER_ACCESS.moduleId, 'renderer module id drifted — update RENDERER_ACCESS in src/mixin_tokens.js');
-  assert.equal(foundRenderer.exportName, RENDERER_ACCESS.exportName, 'renderer export name drifted — update RENDERER_ACCESS in src/mixin_tokens.js');
-
-  const foundThree = findThreeRendererAccessPath(bundleText);
-  assert.equal(foundThree.moduleId, THREE_RENDERER_ACCESS.moduleId, 'THREE.WebGLRenderer module id drifted — update THREE_RENDERER_ACCESS in src/mixin_tokens.js');
-  assert.equal(foundThree.exportName, THREE_RENDERER_ACCESS.exportName, 'THREE.WebGLRenderer export name drifted — update THREE_RENDERER_ACCESS in src/mixin_tokens.js');
+  // PolyModLoader's own eval() scope. If a game update reshuffles the module
+  // id or export name, this must fail loudly instead of silently mis-resolving.
+  const found = findRendererAccessPath(bundleText);
+  assert.equal(found.moduleId, RENDERER_ACCESS.moduleId, 'renderer module id drifted — update RENDERER_ACCESS in src/mixin_tokens.js');
+  assert.equal(found.exportName, RENDERER_ACCESS.exportName, 'renderer export name drifted — update RENDERER_ACCESS in src/mixin_tokens.js');
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });

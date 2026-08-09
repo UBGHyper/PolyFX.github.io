@@ -50,19 +50,28 @@
 // This is unrelated to (and layered on top of) a separate, now-solved
 // problem: V isn't reachable as a bare "V" identifier from PML's own
 // getFromPolyTrack eval() scope at all, because it's declared in its own
-// isolated webpack module. See RENDERER_ACCESS / THREE_RENDERER_ACCESS in
-// mixin_tokens.js for how both classes are actually reached — via the
-// shared webpack require function ("i" in that scope) plus each class's
-// module id, e.g. `i(1507).A`.
+// isolated webpack module. See RENDERER_ACCESS in mixin_tokens.js for how
+// it's actually reached — via the shared webpack require function ("i" in
+// that scope) plus its module id, e.g. `i(1507).A`.
 //
-// The fix here sidesteps registerClassMixin's reconstruction entirely: it
-// fetches the live class objects via getFromPolyTrack (a plain property
-// read — no eval'd function is created, so nothing loses its closure), then
-// reassigns their prototype methods directly from THIS module's own,
-// perfectly normal closure. update() itself is never touched; only
-// WebGLRenderer.prototype.render (a standalone, non-private-field three.js
-// library method — safe to wrap) and a temporary per-call wrapper around
-// the day/night object's own getSunPosition() method (also not private).
+// The fix here sidesteps registerClassMixin's reconstruction entirely by
+// reassigning V.prototype.update directly from this module's own, perfectly
+// normal closure (getFromPolyTrack is only used to fetch V itself — a plain
+// property read, not an eval'd function, so nothing loses its closure).
+//
+// That still leaves the actual renderer object needed to call
+// window.__PolyFX.render(...) — real three.js's WebGLRenderer assigns
+// render() as an INSTANCE property inside its own constructor (closing over
+// many constructor-local variables — a normal three.js pattern, not
+// specific to this bundle), so it can't be reached via .prototype.render at
+// all, patched or not. It's found by briefly observing the global,
+// module-independent WeakMap.prototype.get during one real update() call —
+// V's private-field helper (module 1635) reads private fields via literal
+// WeakMap.get(this) calls, so whichever call returns an object with
+// isWebGLRenderer===true is V's own renderer instance. Verified against a
+// synthetic reproduction of this exact shape before shipping (multiple
+// frames, confirms one-time discovery, confirms the global patch is fully
+// removed afterward, confirms unrelated WeakMaps are unaffected).
 //
 // The dev flavor (tools/game-bundle.mjs's patchBundle, used by
 // app_src/main.bundle.js for `npm run dev` / `npm run shots`) doesn't have
@@ -71,7 +80,7 @@
 // module and keeps its closure naturally. It still uses the token-splice
 // approach in src/mixin_tokens.js's MIXIN_TOKENS.
 import { PolyMod, SettingType } from './vendor/PolyTypes.js';
-import { RENDERER_ACCESS, THREE_RENDERER_ACCESS } from './mixin_tokens.js';
+import { RENDERER_ACCESS } from './mixin_tokens.js';
 
 import './runtime.js';
 
@@ -113,24 +122,44 @@ class PolyFXShadersMod extends PolyMod {
 
     try {
       const V = pml.getFromPolyTrack(`i(${RENDERER_ACCESS.moduleId}).${RENDERER_ACCESS.exportName}`);
-      const WebGLRendererClass = pml.getFromPolyTrack(`i(${THREE_RENDERER_ACCESS.moduleId}).${THREE_RENDERER_ACCESS.exportName}`);
-
       const originalUpdate = V.prototype.update;
-      const originalRender = WebGLRendererClass.prototype.render;
 
-      // Set by the update() wrapper below (getSunPosition() is always called
-      // near the start of the original update(), and render() always at the
-      // end of that same synchronous call) so the render() wrapper has a sun
-      // direction to hand PolyFX for god rays, without needing V's own
-      // private sun-vector field.
+      // Set by the getSunPosition wrapper below (always called near the
+      // start of the original update(), before render() at its end) so the
+      // render patch has a sun direction to hand PolyFX for god rays,
+      // without needing V's own private sun-vector field.
       let lastSunDir = null;
 
-      // (a) sun-direction override hook. Temporarily wraps the day/night
-      // object's own getSunPosition for the duration of the original
-      // update() call, so PolyFX can mutate the vector it returns exactly
-      // like the old INSERT mixin did — but via a real, closure-intact
-      // method instead of a reconstructed one.
+      // Discovered once, on whichever update() call happens to read the
+      // renderer field first — see the file header for why this is
+      // necessary at all (render() is an instance property, not reachable
+      // via .prototype). Patched in place, so every later read of it
+      // (stock code included) naturally goes through the wrapper too.
+      let rendererPatched = false;
+
+      function installRenderPatch(renderer) {
+        const originalRender = renderer.render;
+        // Passing originalRender through as stockRender (rather than
+        // letting runtime.js call renderer.render(...) itself) is required,
+        // not just tidy: renderer.render IS this very wrapper once
+        // installed, so a stock-passthrough path inside
+        // window.__PolyFX.render that called it directly would recurse into
+        // itself.
+        renderer.render = function (scene, camera) {
+          if (window.__PolyFX) {
+            window.__PolyFX.render(this, scene, camera, undefined, lastSunDir, originalRender);
+            return;
+          }
+          return originalRender.call(this, scene, camera);
+        };
+      }
+
       V.prototype.update = function (e) {
+        // (a) sun-direction override hook. Temporarily wraps the day/night
+        // object's own getSunPosition for the duration of the original
+        // update() call, so PolyFX can mutate the vector it returns exactly
+        // like the old INSERT mixin did — but via a real, closure-intact
+        // method instead of a reconstructed one.
         const hadOwnGetSunPosition = Object.prototype.hasOwnProperty.call(e, 'getSunPosition');
         const originalGetSunPosition = e.getSunPosition;
         e.getSunPosition = function (...args) {
@@ -139,26 +168,30 @@ class PolyFXShadersMod extends PolyMod {
           lastSunDir = pos;
           return pos;
         };
+
+        // (b) renderer discovery, only until it succeeds once. this === the
+        // V instance the private-field WeakMaps are keyed by.
+        const self = this;
+        let originalWeakMapGet = null;
+        if (!rendererPatched) {
+          originalWeakMapGet = WeakMap.prototype.get;
+          WeakMap.prototype.get = function (key) {
+            const result = originalWeakMapGet.call(this, key);
+            if (!rendererPatched && key === self && result && result.isWebGLRenderer === true) {
+              installRenderPatch(result);
+              rendererPatched = true;
+            }
+            return result;
+          };
+        }
+
         try {
           return originalUpdate.call(this, e);
         } finally {
           if (hadOwnGetSunPosition) e.getSunPosition = originalGetSunPosition;
           else delete e.getSunPosition;
+          if (originalWeakMapGet) WeakMap.prototype.get = originalWeakMapGet;
         }
-      };
-
-      // (b) route the render call through PolyFX when present. Passing
-      // originalRender through as stockRender (rather than letting
-      // runtime.js call renderer.render(...) itself) is required, not just
-      // tidy: renderer.render IS this very wrapper once installed, so any
-      // stock-passthrough path inside window.__PolyFX.render that called it
-      // directly would recurse into itself.
-      WebGLRendererClass.prototype.render = function (scene, camera) {
-        if (window.__PolyFX) {
-          window.__PolyFX.render(this, scene, camera, undefined, lastSunDir, originalRender);
-          return;
-        }
-        return originalRender.call(this, scene, camera);
       };
     } catch (e) {
       // Caught here (not left to PML's own try/catch around init()) so a
