@@ -87,34 +87,73 @@ class PolyFXShadersMod extends PolyMod {
     pml.registerSetting('Time of Day', 'TimeOfDay', SettingType.CUSTOM, '0', TIME_OF_DAY_OPTIONS);
     pml.registerSetting('Underglow', 'Underglow', SettingType.CUSTOM, '0', UNDERGLOW_OPTIONS);
 
-    // (a) sun-direction override hook.
-    pml.registerClassMixin('V.prototype', 'update', {
-      type: MixinType.INSERT,
-      token: MIXIN_TOKENS.sunInsert,
-      func: `window.__PolyFX?.overrideSun?.((0, i.gn)(this, I, "f"));`,
-    });
+    // TEMPORARY DIAGNOSTIC — remove once the correct scope path is confirmed.
+    // 'V.prototype' throws inside registerClassMixin ("Cannot read properties
+    // of undefined (reading 'toString')"): pml.getFromPolyTrack('V') resolves
+    // to something real but unrelated (an unrelated WASM-loading stub
+    // function that happens to share the name "V" in a different,
+    // coincidentally eval-reachable scope). Brute-forces every single/double
+    // uppercase-letter name through PML's own real getFromPolyTrack to find
+    // whichever one actually holds the render call. Wrapped so it can never
+    // throw, and logs to console regardless of outcome.
+    try {
+      const marker = MIXIN_TOKENS.renderTokenStart;
+      const candidates = [];
+      for (let c = 65; c <= 90; c++) candidates.push(String.fromCharCode(c));
+      for (let c1 = 65; c1 <= 90; c1++) for (let c2 = 65; c2 <= 90; c2++) candidates.push(String.fromCharCode(c1) + String.fromCharCode(c2));
+      const found = [];
+      for (const name of candidates) {
+        try {
+          const obj = pml.getFromPolyTrack(name);
+          const upd = obj && obj.prototype && obj.prototype.update;
+          if (typeof upd === 'function') {
+            const src = upd.toString();
+            if (src.includes(marker)) found.push(name);
+          }
+        } catch (_) { /* not reachable under this name from here */ }
+      }
+      console.log('[PolyFX diag] correct scope name(s) found:', JSON.stringify(found));
+    } catch (e) {
+      console.error('[PolyFX diag] scan itself failed:', e);
+    }
+    // --- END TEMPORARY DIAGNOSTIC ---
 
-    // (b) route the render call through PolyFX when present. tokenEnd is the
-    // exact tail of update()'s own render(...) call plus its closing brace —
-    // i.e. the very end of the method — not a reference to any other method.
-    pml.registerClassMixin('V.prototype', 'update', {
-      type: MixinType.REPLACEBETWEEN,
-      tokenStart: MIXIN_TOKENS.renderTokenStart,
-      tokenEnd: MIXIN_TOKENS.renderTokenEnd,
-      func: `window.__PolyFX
-                ? window.__PolyFX.render(
-                    (0, i.gn)(this, k, "f"),
-                    (0, i.gn)(this, E, "f"),
-                    (0, i.gn)(this, M, "f"),
-                    (0, i.gn)(this, x, "f"),
-                    (0, i.gn)(this, I, "f"),
-                  )
-                : (0, i.gn)(this, k, "f").render(
-                    (0, i.gn)(this, E, "f"),
-                    (0, i.gn)(this, M, "f"),
-                  );
-              }`,
-    });
+    try {
+      // (a) sun-direction override hook.
+      pml.registerClassMixin('V.prototype', 'update', {
+        type: MixinType.INSERT,
+        token: MIXIN_TOKENS.sunInsert,
+        func: `window.__PolyFX?.overrideSun?.((0, i.gn)(this, I, "f"));`,
+      });
+
+      // (b) route the render call through PolyFX when present. tokenEnd is
+      // the exact tail of update()'s own render(...) call plus its closing
+      // brace — i.e. the very end of the method — not a reference to any
+      // other method.
+      pml.registerClassMixin('V.prototype', 'update', {
+        type: MixinType.REPLACEBETWEEN,
+        tokenStart: MIXIN_TOKENS.renderTokenStart,
+        tokenEnd: MIXIN_TOKENS.renderTokenEnd,
+        func: `window.__PolyFX
+                  ? window.__PolyFX.render(
+                      (0, i.gn)(this, k, "f"),
+                      (0, i.gn)(this, E, "f"),
+                      (0, i.gn)(this, M, "f"),
+                      (0, i.gn)(this, x, "f"),
+                      (0, i.gn)(this, I, "f"),
+                    )
+                  : (0, i.gn)(this, k, "f").render(
+                      (0, i.gn)(this, E, "f"),
+                      (0, i.gn)(this, M, "f"),
+                    );
+                }`,
+      });
+    } catch (e) {
+      // Caught here (not left to PML's own try/catch around init()) so the
+      // diagnostic above still runs and the mod doesn't get unloaded while
+      // we're actively narrowing this down.
+      console.error('[PolyFX] mixin registration failed (see diagnostic above for the likely fix):', e);
+    }
   };
 }
 
