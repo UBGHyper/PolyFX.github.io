@@ -16,6 +16,7 @@ import { WeatherEngine, WEATHER_NAMES } from './weather_engine.js';
 const GRAPHICS_PRESET_ID = 'GraphicsPreset';
 const TIME_OF_DAY_ID = 'TimeOfDay';
 const UNDERGLOW_ID = 'Underglow';
+const HEADLIGHTS_ID = 'Headlights';
 const PRESET = { OFF: 0, BALANCED: 1, ENHANCED: 2, SEMI_REAL: 3, PHOTO_REAL: 4, VERY_LOW: 5 };
 const TOD_HOURS = [null, 6.5, 9, 12, 15, 16.8, 18, 22];
 
@@ -439,6 +440,8 @@ class PolyFX {
     this.todOverride = null;
     this.underglowOverride = null;
     this.lastUnderglowSetting = null;
+    this.carLightsOverride = null;
+    this.lastCarLightsSetting = null;
 
     // Shared scene scan (cars, lights, smoke material) — see _sharedScan.
     this._scanT = 0;
@@ -550,6 +553,17 @@ class PolyFX {
       }
       this._applyEnv(scene);
       this._applySmokeTint(scene);
+
+      let carLightsSetting = this.carLightsOverride != null ? this.carLightsOverride : 1;
+      if (this.carLightsOverride == null) {
+        try { carLightsSetting = parseInt(window.polyModLoader?.getSetting(HEADLIGHTS_ID), 10); } catch (_) {}
+        if (!Number.isFinite(carLightsSetting)) carLightsSetting = 1;
+      }
+      if (carLightsSetting !== this.lastCarLightsSetting) {
+        this.lastCarLightsSetting = carLightsSetting;
+        this.carLightsEnabled = carLightsSetting >= 1;
+        if (!this.carLightsEnabled && this.carLights) this.carLights.disableAll();
+      }
 
       if (this.carLights) {
         const dusk = this.skyActive && !this.envOnly && this.sky && this.sky.sunDir.y < 0.1;

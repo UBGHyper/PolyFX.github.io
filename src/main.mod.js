@@ -116,6 +116,11 @@ const UNDERGLOW_OPTIONS = [
   { title: 'On', value: '1' },
 ];
 
+const HEADLIGHTS_OPTIONS = [
+  { title: 'Off', value: '0' },
+  { title: 'On', value: '1' },
+];
+
 class PolyFXShadersMod extends PolyMod {
   init = (pml) => {
     this.pml = pml;
@@ -126,6 +131,7 @@ class PolyFXShadersMod extends PolyMod {
     pml.registerSetting('Graphics Preset', 'GraphicsPreset', SettingType.CUSTOM, '1', GRAPHICS_PRESET_OPTIONS);
     pml.registerSetting('Time of Day', 'TimeOfDay', SettingType.CUSTOM, '0', TIME_OF_DAY_OPTIONS);
     pml.registerSetting('Underglow', 'Underglow', SettingType.CUSTOM, '0', UNDERGLOW_OPTIONS);
+    pml.registerSetting('Headlights', 'Headlights', SettingType.CUSTOM, '1', HEADLIGHTS_OPTIONS);
 
     try {
       const V = pml.getFromPolyTrack(`i(${RENDERER_ACCESS.moduleId}).${RENDERER_ACCESS.exportName}`);

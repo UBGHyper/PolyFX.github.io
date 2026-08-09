@@ -16,8 +16,9 @@ Add this as a custom mod URL in [PolyModLoader](https://polymodloader.com):
 https://cdn.polymodloader.com/gh/UBGHyper/PolyFX.github.io/main/release
 ```
 
-Settings show up under **Realistic Shading**: Graphics Preset (default Balanced), Time of Day, and
-Underglow. In-game, press **`** (backtick) for a live tuning panel with every parameter as a slider.
+Settings show up under **Realistic Shading**: Graphics Preset (default Balanced), Time of Day,
+Underglow, and Headlights. In-game, press **`** (backtick) for a live tuning panel with every
+parameter as a slider.
 **F2** is a free-fly photo mode, **F9** saves a screenshot.
 
 ## Local dev setup
