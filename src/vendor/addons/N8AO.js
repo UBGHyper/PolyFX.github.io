@@ -22,7 +22,6 @@ $e4ca8dcb0218f846$var$_geometry.setAttribute("uv", new $5Whe3$BufferAttribute(ne
     0,
     2
 ]), 2));
-// Recent three.js versions break setDrawRange or itemSize <3 position
 $e4ca8dcb0218f846$var$_geometry.boundingSphere = new $5Whe3$Sphere();
 $e4ca8dcb0218f846$var$_geometry.computeBoundingSphere = function() {};
 const $e4ca8dcb0218f846$var$_camera = new $5Whe3$OrthographicCamera();
@@ -119,13 +118,13 @@ const $1ed45968c1160c3c$export$c9b263b9a17dffd7 = {
     },
     depthWrite: false,
     depthTest: false,
-    vertexShader: /* glsl */ `
+    vertexShader: `
 varying vec2 vUv;
 void main() {
   vUv = uv;
   gl_Position = vec4(position, 1);
 }`,
-    fragmentShader: /* glsl */ `
+    fragmentShader: `
     #define SAMPLES 16
     #define FSAMPLES 16.0
 uniform sampler2D sceneDiffuse;
@@ -450,13 +449,13 @@ const $12b21d24d1192a04$export$a815acccbd2c9a49 = {
     },
     depthWrite: false,
     depthTest: false,
-    vertexShader: /* glsl */ `
+    vertexShader: `
 		varying vec2 vUv;
 		void main() {
 			vUv = uv;
 			gl_Position = vec4(position, 1);
 		}`,
-    fragmentShader: /* glsl */ `
+    fragmentShader: `
 		uniform sampler2D sceneDiffuse;
     uniform highp sampler2D sceneDepth;
     uniform highp sampler2D downsampledDepth;
@@ -755,13 +754,13 @@ const $e52378cd0f5a973d$export$57856b59f317262e = {
     },
     depthWrite: false,
     depthTest: false,
-    vertexShader: /* glsl */ `
+    vertexShader: `
 		varying vec2 vUv;
 		void main() {
 			vUv = uv;
 			gl_Position = vec4(position, 1.0);
 		}`,
-    fragmentShader: /* glsl */ `
+    fragmentShader: `
 		uniform sampler2D sceneDiffuse;
     uniform highp sampler2D sceneDepth;
     uniform sampler2D tDiffuse;
@@ -921,13 +920,13 @@ const $26aca173e0984d99$export$1efdf491687cd442 = {
     },
     depthWrite: false,
     depthTest: false,
-    vertexShader: /* glsl */ `
+    vertexShader: `
     varying vec2 vUv;
     void main() {
         vUv = uv;
         gl_Position = vec4(position, 1);
     }`,
-    fragmentShader: /* glsl */ `
+    fragmentShader: `
     uniform highp sampler2D sceneDepth;
     uniform vec2 resolution;
     uniform float near;
@@ -1101,60 +1100,26 @@ const $ff9437d9c7577f11$export$156f6a58f569aa09 = $ff9437d9c7577f11$var$version 
 
 
 const $87431ee93b037844$var$bluenoiseBits = Uint8Array.from(atob((0, $06269ad78f3c5fdf$export$2e2bcd8739ae039)), (c)=>c.charCodeAt(0));
-/**
- * 
- * @param {*} timerQuery 
- * @param {THREE.WebGLRenderer} gl 
- * @param {N8AOPostPass | N8AOPass} pass 
- */ function $87431ee93b037844$var$checkTimerQuery(timerQuery, gl, pass) {
+ function $87431ee93b037844$var$checkTimerQuery(timerQuery, gl, pass) {
     const available = gl.getQueryParameter(timerQuery, gl.QUERY_RESULT_AVAILABLE);
     if (available) {
         const elapsedTimeInNs = gl.getQueryParameter(timerQuery, gl.QUERY_RESULT);
         const elapsedTimeInMs = elapsedTimeInNs / 1000000;
         pass.lastTime = pass.lastTime === 0 ? elapsedTimeInMs : pass.timeRollingAverage * pass.lastTime + (1 - pass.timeRollingAverage) * elapsedTimeInMs;
-    } else // If the result is not available yet, check again after a delay
+    } else
     setTimeout(()=>{
         $87431ee93b037844$var$checkTimerQuery(timerQuery, gl, pass);
     }, 1);
 }
 class $87431ee93b037844$export$2489f9981ab0fa82 extends (0, $5Whe3$Pass1) {
-    /**
-     * 
-     * @param {THREE.Scene} scene
-     * @param {THREE.Camera} camera 
-     * @param {number} width 
-     * @param {number} height
-     *  
-     * @property {THREE.Scene} scene
-     * @property {THREE.Camera} camera
-     * @property {number} width
-     * @property {number} height
-     */ constructor(scene, camera, width = 512, height = 512){
+ constructor(scene, camera, width = 512, height = 512){
         super();
         this.width = width;
         this.height = height;
         this.clear = true;
         this.camera = camera;
         this.scene = scene;
-        /**
-         * @type {Proxy & {
-         * aoSamples: number,
-         * aoRadius: number,
-         * denoiseSamples: number,
-         * denoiseRadius: number,
-         * distanceFalloff: number,
-         * intensity: number,
-         * denoiseIterations: number,
-         * renderMode: 0 | 1 | 2 | 3 | 4,
-         * color: THREE.Color,
-         * gammaCorrection: boolean,
-         * logarithmicDepthBuffer: boolean
-         * screenSpaceRadius: boolean,
-         * halfRes: boolean,
-         * depthAwareUpsampling: boolean
-         * colorMultiply: boolean
-         * }
-         */ this.autosetGamma = true;
+ this.autosetGamma = true;
         this.configuration = new Proxy({
             aoSamples: 16,
             aoRadius: 5.0,
@@ -1200,8 +1165,8 @@ class $87431ee93b037844$export$2489f9981ab0fa82 extends (0, $5Whe3$Pass1) {
                 return true;
             }
         });
-        /** @type {THREE.Vector3[]} */ this.samples = [];
-        /** @type {THREE.Vector2[]} */ this.samplesDenoise = [];
+ this.samples = [];
+ this.samplesDenoise = [];
         this.autoDetectTransparency = true;
         this.frames = 0;
         this.lastViewMatrix = new $5Whe3$Matrix4();
@@ -1211,7 +1176,6 @@ class $87431ee93b037844$export$2489f9981ab0fa82 extends (0, $5Whe3$Pass1) {
         this.configureHalfResTargets();
         this.detectTransparency();
         this.configureTransparencyTarget();
-        //   this.effectCompisterQuad = new FullScreenTriangle(new THREE.ShaderMaterial(EffectCompositer));
         this.copyQuad = new (0, $e4ca8dcb0218f846$export$dcd670d73db751f5)(new $5Whe3$ShaderMaterial({
             uniforms: {
                 tDiffuse: {
@@ -1288,7 +1252,7 @@ class $87431ee93b037844$export$2489f9981ab0fa82 extends (0, $5Whe3$Pass1) {
                 }
                 `
         }));
-        /** @type {THREE.DataTexture} */ this.bluenoise = new $5Whe3$DataTexture($87431ee93b037844$var$bluenoiseBits, 128, 128);
+ this.bluenoise = new $5Whe3$DataTexture($87431ee93b037844$var$bluenoiseBits, 128, 128);
         this.bluenoise.colorSpace = $5Whe3$NoColorSpace;
         this.bluenoise.wrapS = $5Whe3$RepeatWrapping;
         this.bluenoise.wrapT = $5Whe3$RepeatWrapping;
@@ -1359,13 +1323,13 @@ class $87431ee93b037844$export$2489f9981ab0fa82 extends (0, $5Whe3$Pass1) {
                         value: this.depthTexture
                     }
                 },
-                vertexShader: /* glsl */ `
+                vertexShader: `
             varying vec2 vUv;
             void main() {
                 vUv = uv;
                 gl_Position = vec4(position, 1);
             }`,
-                fragmentShader: /* glsl */ `
+                fragmentShader: `
             uniform sampler2D depthTexture;
             varying vec2 vUv;
             void main() {
@@ -1398,12 +1362,10 @@ class $87431ee93b037844$export$2489f9981ab0fa82 extends (0, $5Whe3$Pass1) {
         this.scene.traverse((obj)=>{
             oldVisibility.set(obj, obj.visible);
         });
-        // Override the state
         this.scene.background = null;
         renderer.autoClearDepth = false;
         renderer.setClearColor(new $5Whe3$Color(0, 0, 0), 0);
         this.depthCopyPass.material.uniforms.depthTexture.value = this.depthTexture;
-        // Render out transparent objects WITHOUT depth write
         renderer.setRenderTarget(this.transparencyRenderTargetDWFalse);
         this.scene.traverse((obj)=>{
             if (obj.material) obj.visible = oldVisibility.get(obj) && (obj.material.transparent && !obj.material.depthWrite && !obj.userData.treatAsOpaque || !!obj.userData.cannotReceiveAO);
@@ -1411,7 +1373,6 @@ class $87431ee93b037844$export$2489f9981ab0fa82 extends (0, $5Whe3$Pass1) {
         renderer.clear(true, true, true);
         this.depthCopyPass.render(renderer);
         renderer.render(this.scene, this.camera);
-        // Render out transparent objects WITH depth write
         renderer.setRenderTarget(this.transparencyRenderTargetDWTrue);
         this.scene.traverse((obj)=>{
             if (obj.material) obj.visible = oldVisibility.get(obj) && obj.material.transparent && obj.material.depthWrite && !obj.userData.treatAsOpaque;
@@ -1419,7 +1380,6 @@ class $87431ee93b037844$export$2489f9981ab0fa82 extends (0, $5Whe3$Pass1) {
         renderer.clear(true, true, true);
         this.depthCopyPass.render(renderer);
         renderer.render(this.scene, this.camera);
-        // Restore
         this.scene.traverse((obj)=>{
             obj.visible = oldVisibility.get(obj);
         });
@@ -1473,29 +1433,19 @@ class $87431ee93b037844$export$2489f9981ab0fa82 extends (0, $5Whe3$Pass1) {
             this.effectCompositerQuad.material = new $5Whe3$ShaderMaterial(e);
         } else this.effectCompositerQuad = new (0, $e4ca8dcb0218f846$export$dcd670d73db751f5)(new $5Whe3$ShaderMaterial(e));
     }
-    /**
-         * 
-         * @param {Number} n 
-         * @returns {THREE.Vector3[]}
-         */ generateHemisphereSamples(n) {
+ generateHemisphereSamples(n) {
         const points = [];
         for(let k = 0; k < n; k++){
             const theta = 2.399963 * k;
             const r = Math.sqrt(k + 0.5) / Math.sqrt(n);
             const x = r * Math.cos(theta);
             const y = r * Math.sin(theta);
-            // Project to hemisphere
             const z = Math.sqrt(1 - (x * x + y * y));
             points.push(new $5Whe3$Vector3(x, y, z));
         }
         return points;
     }
-    /**
-         * 
-         * @param {number} numSamples 
-         * @param {number} numRings 
-         * @returns {THREE.Vector2[]}
-         */ generateDenoiseSamples(numSamples, numRings) {
+ generateDenoiseSamples(numSamples, numRings) {
         const angleStep = 2 * Math.PI * numRings / numSamples;
         const invNumSamples = 1.0 / numSamples;
         const radiusStep = invNumSamples;
@@ -1533,10 +1483,6 @@ class $87431ee93b037844$export$2489f9981ab0fa82 extends (0, $5Whe3$Pass1) {
     render(renderer, inputBuffer, outputBuffer) {
         const xrEnabled = renderer.xr.enabled;
         renderer.xr.enabled = false;
-        // Copy inputBuffer to outputBuffer
-        //renderer.setRenderTarget(outputBuffer);
-        //  this.copyQuad.material.uniforms.tDiffuse.value = inputBuffer.texture;
-        //   this.copyQuad.render(renderer);
         if (renderer.capabilities.logarithmicDepthBuffer !== this.configuration.logarithmicDepthBuffer) {
             this.configuration.logarithmicDepthBuffer = renderer.capabilities.logarithmicDepthBuffer;
             this.configureAOPass(this.configuration.logarithmicDepthBuffer, this.camera.isOrthographicCamera);
@@ -1615,11 +1561,8 @@ class $87431ee93b037844$export$2489f9981ab0fa82 extends (0, $5Whe3$Pass1) {
             this.effectShaderQuad.material.uniforms["ortho"].value = this.camera.isOrthographicCamera;
             this.effectShaderQuad.material.uniforms["screenSpaceRadius"].value = this.configuration.screenSpaceRadius;
             this.effectShaderQuad.material.uniforms["frame"].value = this.frame;
-            // Start the AO
             renderer.setRenderTarget(this.writeTargetInternal);
             this.effectShaderQuad.render(renderer);
-            // End the AO
-            // Start the blur
             for(let i = 0; i < this.configuration.denoiseIterations; i++){
                 [this.writeTargetInternal, this.readTargetInternal] = [
                     this.readTargetInternal,
@@ -1655,9 +1598,6 @@ class $87431ee93b037844$export$2489f9981ab0fa82 extends (0, $5Whe3$Pass1) {
             this.accumulationQuad.render(renderer);
             renderer.autoClear = oldAutoClear;
         }
-        // Now, we have the blurred AO in writeTargetInternal
-        // End the blur
-        // Start the composition
         if (this.configuration.transparencyAware) {
             this.effectCompositerQuad.material.uniforms["transparencyDWFalse"].value = this.transparencyRenderTargetDWFalse.texture;
             this.effectCompositerQuad.material.uniforms["transparencyDWTrue"].value = this.transparencyRenderTargetDWTrue.texture;
@@ -1697,8 +1637,7 @@ class $87431ee93b037844$export$2489f9981ab0fa82 extends (0, $5Whe3$Pass1) {
                 this.effectCompositerQuad.material.uniforms["fogDensity"].value = this.scene.fog.density;
             } else console.error(`Unsupported fog type ${this.scene.fog.constructor.name} in SSAOPass.`);
         }
-        renderer.setRenderTarget(/* this.renderToScreen ? null :
-                 outputBuffer*/ this.outputTargetInternal);
+        renderer.setRenderTarget( this.outputTargetInternal);
         this.effectCompositerQuad.render(renderer);
         renderer.setRenderTarget(this.renderToScreen ? null : outputBuffer);
         this.copyQuad.material.uniforms["tDiffuse"].value = this.outputTargetInternal.texture;
@@ -1709,20 +1648,13 @@ class $87431ee93b037844$export$2489f9981ab0fa82 extends (0, $5Whe3$Pass1) {
         }
         renderer.xr.enabled = xrEnabled;
     }
-    /**
-         * Enables the debug mode of the AO, meaning the lastTime value will be updated.
-         */ enableDebugMode() {
+ enableDebugMode() {
         this.debugMode = true;
     }
-    /**
-         * Disables the debug mode of the AO, meaning the lastTime value will not be updated.
-         */ disableDebugMode() {
+ disableDebugMode() {
         this.debugMode = false;
     }
-    /**
-         * Sets the display mode of the AO
-         * @param {"Combined" | "AO" | "No AO" | "Split" | "Split AO"} mode - The display mode. 
-         */ setDisplayMode(mode) {
+ setDisplayMode(mode) {
         this.configuration.renderMode = [
             "Combined",
             "AO",
@@ -1731,10 +1663,7 @@ class $87431ee93b037844$export$2489f9981ab0fa82 extends (0, $5Whe3$Pass1) {
             "Split AO"
         ].indexOf(mode);
     }
-    /**
-         * 
-         * @param {"Performance" | "Low" | "Medium" | "High" | "Ultra"} mode 
-         */ setQualityMode(mode) {
+ setQualityMode(mode) {
         if (mode === "Performance") {
             this.configuration.aoSamples = 8;
             this.configuration.denoiseSamples = 4;
@@ -1763,61 +1692,26 @@ class $87431ee93b037844$export$2489f9981ab0fa82 extends (0, $5Whe3$Pass1) {
 
 
 const $05f6997e4b65da14$var$bluenoiseBits = Uint8Array.from(atob((0, $06269ad78f3c5fdf$export$2e2bcd8739ae039)), (c)=>c.charCodeAt(0));
-/**
- * 
- * @param {*} timerQuery 
- * @param {THREE.WebGLRenderer} gl 
- * @param {N8AOPass} pass 
- */ function $05f6997e4b65da14$var$checkTimerQuery(timerQuery, gl, pass) {
+ function $05f6997e4b65da14$var$checkTimerQuery(timerQuery, gl, pass) {
     const available = gl.getQueryParameter(timerQuery, gl.QUERY_RESULT_AVAILABLE);
     if (available) {
         const elapsedTimeInNs = gl.getQueryParameter(timerQuery, gl.QUERY_RESULT);
         const elapsedTimeInMs = elapsedTimeInNs / 1000000;
         pass.lastTime = pass.lastTime === 0 ? elapsedTimeInMs : pass.timeRollingAverage * pass.lastTime + (1 - pass.timeRollingAverage) * elapsedTimeInMs;
-    } else // If the result is not available yet, check again after a delay
+    } else
     setTimeout(()=>{
         $05f6997e4b65da14$var$checkTimerQuery(timerQuery, gl, pass);
     }, 1);
 }
 class $05f6997e4b65da14$export$2d57db20b5eb5e0a extends (0, $5Whe3$Pass) {
-    /**
-     * 
-     * @param {THREE.Scene} scene
-     * @param {THREE.Camera} camera 
-     * @param {number} width 
-     * @param {number} height
-     *  
-     * @property {THREE.Scene} scene
-     * @property {THREE.Camera} camera
-     * @property {number} width
-     * @property {number} height
-     */ constructor(scene, camera, width = 512, height = 512){
+ constructor(scene, camera, width = 512, height = 512){
         super();
         this.width = width;
         this.height = height;
         this.clear = true;
         this.camera = camera;
         this.scene = scene;
-        /**
-         * @type {Proxy & {
-         * aoSamples: number,
-         * aoRadius: number,
-         * denoiseSamples: number,
-         * denoiseRadius: number,
-         * distanceFalloff: number,
-         * intensity: number,
-         * denoiseIterations: number,
-         * renderMode: 0 | 1 | 2 | 3 | 4,
-         * color: THREE.Color,
-         * gammaCorrection: boolean,
-         * logarithmicDepthBuffer: boolean
-         * screenSpaceRadius: boolean,
-         * halfRes: boolean,
-         * depthAwareUpsampling: boolean,
-         * autoRenderBeauty: boolean
-         * colorMultiply: boolean
-         * }
-         */ this.configuration = new Proxy({
+ this.configuration = new Proxy({
             aoSamples: 16,
             aoRadius: 5.0,
             aoTones: 0.0,
@@ -1861,11 +1755,7 @@ class $05f6997e4b65da14$export$2d57db20b5eb5e0a extends (0, $5Whe3$Pass) {
                     this.configureTransparencyTarget();
                 }
                 if (propName === "stencil" && oldProp !== value) {
-                    /*  this.beautyRenderTarget.stencilBuffer = value;
-                      this.beautyRenderTarget.depthTexture.format = value ? THREE.DepthStencilFormat : THREE.DepthFormat;
-                      this.beautyRenderTarget.depthTexture.type = value ? THREE.UnsignedInt248Type : THREE.UnsignedIntType;
-                      this.beautyRenderTarget.depthTexture.needsUpdate = true;
-                      this.beautyRenderTarget.needsUpdate = true;*/ this.beautyRenderTarget.dispose();
+ this.beautyRenderTarget.dispose();
                     this.beautyRenderTarget = new $5Whe3$WebGLRenderTarget(this.width, this.height, {
                         minFilter: $5Whe3$LinearFilter,
                         magFilter: $5Whe3$NearestFilter,
@@ -1879,8 +1769,8 @@ class $05f6997e4b65da14$export$2d57db20b5eb5e0a extends (0, $5Whe3$Pass) {
                 return true;
             }
         });
-        /** @type {THREE.Vector3[]} */ this.samples = [];
-        /** @type {THREE.Vector2[]} */ this.samplesDenoise = [];
+ this.samples = [];
+ this.samplesDenoise = [];
         this.autoDetectTransparency = true;
         this.frame = 0;
         this.lastViewMatrix = new $5Whe3$Matrix4();
@@ -1921,7 +1811,7 @@ class $05f6997e4b65da14$export$2d57db20b5eb5e0a extends (0, $5Whe3$Pass) {
             depthBuffer: false,
             alpha: true
         });
-        /** @type {THREE.DataTexture} */ this.bluenoise = new $5Whe3$DataTexture($05f6997e4b65da14$var$bluenoiseBits, 128, 128);
+ this.bluenoise = new $5Whe3$DataTexture($05f6997e4b65da14$var$bluenoiseBits, 128, 128);
         this.accumulationQuad = new (0, $e4ca8dcb0218f846$export$dcd670d73db751f5)(new $5Whe3$ShaderMaterial({
             uniforms: {
                 frame: {
@@ -2017,13 +1907,13 @@ class $05f6997e4b65da14$export$2d57db20b5eb5e0a extends (0, $5Whe3$Pass) {
                         value: this.beautyRenderTarget.depthTexture
                     }
                 },
-                vertexShader: /* glsl */ `
+                vertexShader: `
             varying vec2 vUv;
             void main() {
                 vUv = uv;
                 gl_Position = vec4(position, 1);
             }`,
-                fragmentShader: /* glsl */ `
+                fragmentShader: `
             uniform sampler2D depthTexture;
             varying vec2 vUv;
             void main() {
@@ -2056,12 +1946,10 @@ class $05f6997e4b65da14$export$2d57db20b5eb5e0a extends (0, $5Whe3$Pass) {
         this.scene.traverse((obj)=>{
             oldVisibility.set(obj, obj.visible);
         });
-        // Override the state
         this.scene.background = null;
         renderer.autoClearDepth = false;
         renderer.setClearColor(new $5Whe3$Color(0, 0, 0), 0);
         this.depthCopyPass.material.uniforms.depthTexture.value = this.beautyRenderTarget.depthTexture;
-        // Render out transparent objects WITHOUT depth write
         renderer.setRenderTarget(this.transparencyRenderTargetDWFalse);
         this.scene.traverse((obj)=>{
             if (obj.material) obj.visible = oldVisibility.get(obj) && (obj.material.transparent && !obj.material.depthWrite && !obj.userData.treatAsOpaque || !!obj.userData.cannotReceiveAO);
@@ -2069,7 +1957,6 @@ class $05f6997e4b65da14$export$2d57db20b5eb5e0a extends (0, $5Whe3$Pass) {
         renderer.clear(true, true, true);
         this.depthCopyPass.render(renderer);
         renderer.render(this.scene, this.camera);
-        // Render out transparent objects WITH depth write
         renderer.setRenderTarget(this.transparencyRenderTargetDWTrue);
         this.scene.traverse((obj)=>{
             if (obj.material) obj.visible = oldVisibility.get(obj) && obj.material.transparent && obj.material.depthWrite && !obj.userData.treatAsOpaque;
@@ -2077,7 +1964,6 @@ class $05f6997e4b65da14$export$2d57db20b5eb5e0a extends (0, $5Whe3$Pass) {
         renderer.clear(true, true, true);
         this.depthCopyPass.render(renderer);
         renderer.render(this.scene, this.camera);
-        // Restore
         this.scene.traverse((obj)=>{
             obj.visible = oldVisibility.get(obj);
         });
@@ -2132,29 +2018,19 @@ class $05f6997e4b65da14$export$2d57db20b5eb5e0a extends (0, $5Whe3$Pass) {
             this.effectCompositerQuad.material = new $5Whe3$ShaderMaterial(e);
         } else this.effectCompositerQuad = new (0, $e4ca8dcb0218f846$export$dcd670d73db751f5)(new $5Whe3$ShaderMaterial(e));
     }
-    /**
-         * 
-         * @param {Number} n 
-         * @returns {THREE.Vector3[]}
-         */ generateHemisphereSamples(n) {
+ generateHemisphereSamples(n) {
         const points = [];
         for(let k = 0; k < n; k++){
             const theta = 2.399963 * k;
             let r = Math.sqrt(k + 0.5) / Math.sqrt(n);
             const x = r * Math.cos(theta);
             const y = r * Math.sin(theta);
-            // Project to hemisphere
             const z = Math.sqrt(1 - (x * x + y * y));
             points.push(new $5Whe3$Vector3(x, y, z));
         }
         return points;
     }
-    /**
-         * 
-         * @param {number} numSamples 
-         * @param {number} numRings 
-         * @returns {THREE.Vector2[]}
-         */ generateDenoiseSamples(numSamples, numRings) {
+ generateDenoiseSamples(numSamples, numRings) {
         const angleStep = 2 * Math.PI * numRings / numSamples;
         const invNumSamples = 1.0 / numSamples;
         const radiusStep = invNumSamples;
@@ -2266,11 +2142,8 @@ class $05f6997e4b65da14$export$2d57db20b5eb5e0a extends (0, $5Whe3$Pass) {
             this.effectShaderQuad.material.uniforms["ortho"].value = this.camera.isOrthographicCamera;
             this.effectShaderQuad.material.uniforms["screenSpaceRadius"].value = this.configuration.screenSpaceRadius;
             this.effectShaderQuad.material.uniforms["frame"].value = this.frame;
-            // Start the AO
             renderer.setRenderTarget(this.writeTargetInternal);
             this.effectShaderQuad.render(renderer);
-            // End the AO
-            // Start the blur
             for(let i = 0; i < this.configuration.denoiseIterations; i++){
                 [this.writeTargetInternal, this.readTargetInternal] = [
                     this.readTargetInternal,
@@ -2306,9 +2179,6 @@ class $05f6997e4b65da14$export$2d57db20b5eb5e0a extends (0, $5Whe3$Pass) {
             this.accumulationQuad.render(renderer);
             renderer.autoClear = oldAutoClear;
         }
-        // Now, we have the blurred AO in writeTargetInternal
-        // End the blur
-        // Start the composition
         if (this.configuration.transparencyAware) {
             this.effectCompositerQuad.material.uniforms["transparencyDWFalse"].value = this.transparencyRenderTargetDWFalse.texture;
             this.effectCompositerQuad.material.uniforms["transparencyDWTrue"].value = this.transparencyRenderTargetDWTrue.texture;
@@ -2356,20 +2226,13 @@ class $05f6997e4b65da14$export$2d57db20b5eb5e0a extends (0, $5Whe3$Pass) {
         }
         renderer.xr.enabled = xrEnabled;
     }
-    /**
-         * Enables the debug mode of the AO, meaning the lastTime value will be updated.
-         */ enableDebugMode() {
+ enableDebugMode() {
         this.debugMode = true;
     }
-    /**
-         * Disables the debug mode of the AO, meaning the lastTime value will not be updated.
-         */ disableDebugMode() {
+ disableDebugMode() {
         this.debugMode = false;
     }
-    /**
-         * Sets the display mode of the AO
-         * @param {"Combined" | "AO" | "No AO" | "Split" | "Split AO"} mode - The display mode. 
-         */ setDisplayMode(mode) {
+ setDisplayMode(mode) {
         this.configuration.renderMode = [
             "Combined",
             "AO",
@@ -2378,10 +2241,7 @@ class $05f6997e4b65da14$export$2d57db20b5eb5e0a extends (0, $5Whe3$Pass) {
             "Split AO"
         ].indexOf(mode);
     }
-    /**
-         * 
-         * @param {"Performance" | "Low" | "Medium" | "High" | "Ultra"} mode 
-         */ setQualityMode(mode) {
+ setQualityMode(mode) {
         if (mode === "Performance") {
             this.configuration.aoSamples = 8;
             this.configuration.denoiseSamples = 4;
@@ -2408,4 +2268,3 @@ class $05f6997e4b65da14$export$2d57db20b5eb5e0a extends (0, $5Whe3$Pass) {
 
 
 export {$05f6997e4b65da14$export$2d57db20b5eb5e0a as N8AOPass, $87431ee93b037844$export$2489f9981ab0fa82 as N8AOPostPass};
-//# sourceMappingURL=N8AO.js.map

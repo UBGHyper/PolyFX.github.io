@@ -1,17 +1,4 @@
-/**
- * @module OutputShader
- * @three_import import { OutputShader } from 'three/addons/shaders/OutputShader.js';
- */
 
-/**
- * Performs tone mapping and color space conversion for
- * FX workflows.
- *
- * Used by {@link OutputPass}.
- *
- * @constant
- * @type {ShaderMaterial~Shader}
- */
 const OutputShader = {
 
 	name: 'OutputShader',
@@ -23,7 +10,7 @@ const OutputShader = {
 
 	},
 
-	vertexShader: /* glsl */`
+	vertexShader:`
 		precision highp float;
 
 		uniform mat4 modelViewMatrix;
@@ -41,7 +28,7 @@ const OutputShader = {
 
 		}`,
 
-	fragmentShader: /* glsl */`
+	fragmentShader:`
 
 		precision highp float;
 

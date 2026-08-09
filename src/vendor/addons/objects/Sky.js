@@ -7,33 +7,8 @@ import {
 	Vector3
 } from '../../three.module.js';
 
-/**
- * Represents a skydome for scene backgrounds. Based on [A Practical Analytic Model for Daylight](https://www.researchgate.net/publication/220720443_A_Practical_Analytic_Model_for_Daylight)
- * aka The Preetham Model, the de facto standard for analytical skydomes.
- *
- * Note that this class can only be used with {@link WebGLRenderer}.
- * When using {@link WebGPURenderer}, use {@link SkyMesh}.
- *
- * More references:
- *
- * - {@link http://simonwallner.at/project/atmospheric-scattering/}
- * - {@link http://blenderartists.org/forum/showthread.php?245954-preethams-sky-impementation-HDR}
- *
- *
- * ```js
- * const sky = new Sky();
- * sky.scale.setScalar( 10000 );
- * scene.add( sky );
- * ```
- *
- * @augments Mesh
- * @three_import import { Sky } from 'three/addons/objects/Sky.js';
- */
 class Sky extends Mesh {
 
-	/**
-	 * Constructs a new skydome.
-	 */
 	constructor() {
 
 		const shader = Sky.SkyShader;
@@ -49,13 +24,6 @@ class Sky extends Mesh {
 
 		super( new BoxGeometry( 1, 1, 1 ), material );
 
-		/**
-		 * This flag can be used for type testing.
-		 *
-		 * @type {boolean}
-		 * @readonly
-		 * @default true
-		 */
 		this.isSky = true;
 
 	}
@@ -75,7 +43,7 @@ Sky.SkyShader = {
 		'up': { value: new Vector3( 0, 1, 0 ) }
 	},
 
-	vertexShader: /* glsl */`
+	vertexShader:`
 		uniform vec3 sunPosition;
 		uniform float rayleigh;
 		uniform float turbidity;
@@ -147,7 +115,7 @@ Sky.SkyShader = {
 
 		}`,
 
-	fragmentShader: /* glsl */`
+	fragmentShader:`
 		varying vec3 vWorldPosition;
 		varying vec3 vSunDirection;
 		varying float vSunfade;

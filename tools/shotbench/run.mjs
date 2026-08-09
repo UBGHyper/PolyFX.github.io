@@ -1,21 +1,3 @@
-// PolyFX screenshot bench — captures every graphics preset at the same
-// deterministic scene (the game's own cold-boot state: stationary car,
-// countdown not yet started, fixed camera) and reports frame time, so a
-// tuning change can be judged against a previous run instead of memory.
-//
-// Usage:
-//   npm run shots                     headed, real GPU, default preset sweep
-//   node tools/shotbench/run.mjs --headless [--force-gpu]
-//   node tools/shotbench/run.mjs --compare out/<A> out/<B>
-//
-// --force-gpu is for THIS repo's own sandboxed/CI environments that have no
-// real GPU: PolyFX's capability gate (see src/runtime.js detectCapabilities)
-// correctly forces the composer off under a software rasterizer like
-// SwiftShader, which is the right behavior for real players but means a
-// plain --headless run here would show every preset looking identical to
-// stock. --force-gpu monkey-patches that one check via page.evaluate so the
-// composer/pass pipeline still gets exercised — frame-time numbers from such
-// a run are NOT representative of real hardware and the report says so.
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -43,7 +25,7 @@ const PRESETS = [
   { key: 'semi-real', value: 3, label: 'Semi-Real' },
   { key: 'photoreal', value: 4, label: 'Photoreal' },
 ];
-const NIGHT_TOD = 7; // TOD_HOURS index — see src/runtime.js
+const NIGHT_TOD = 7;
 
 async function compareMode(dirA, dirB) {
   const a = JSON.parse(fs.readFileSync(path.join(dirA, 'perf.json'), 'utf8'));
@@ -79,9 +61,6 @@ async function main() {
   });
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
 
-  // See the top-of-file comment on --force-gpu / the capability gate for why
-  // this route mock exists at all: getUser() in main.bundle.js treats a
-  // literal JSON `null` body as "no saved user yet" and continues normally.
   await context.route('https://vps.kodub.com/**', (route) => route.abort());
   await context.route('https://vps.kodub.com/v6/user**', (route) =>
     route.fulfill({ status: 200, contentType: 'text/plain', body: 'null' }));
@@ -105,8 +84,6 @@ async function main() {
 
   for (const preset of PRESETS) {
     await page.evaluate((v) => window.__PolyFX.setPresetOverride(v), preset.value);
-    // First non-stock activation pays for composer/shader construction; give
-    // it longer, then let a few more frames settle before sampling FPS.
     await page.waitForTimeout(preset.value === 0 ? 500 : 1800);
     const frameSamples = [];
     for (let i = 0; i < 20; i++) {
@@ -121,10 +98,7 @@ async function main() {
     results.push({ key: preset.key, label: preset.label, file, fps, guardStep: state.guardStep, state });
   }
 
-  // Underglow on/off pair at night — where the glow actually reads. Uses
-  // Enhanced (has bloom, cheap enough to always be in the sweep) rather than
-  // Photoreal so the comparison isn't muddied by SSR/god-rays noise.
-  await page.evaluate(() => window.__PolyFX.setPresetOverride(2)); // Enhanced
+  await page.evaluate(() => window.__PolyFX.setPresetOverride(2));
   await page.evaluate((tod) => window.__PolyFX.setTimeOfDayOverride(tod), NIGHT_TOD);
   await page.waitForTimeout(1200);
   for (const [key, label, on] of [['underglow-off-night', 'Underglow off (night)', 0], ['underglow-on-night', 'Underglow on (night)', 1]]) {

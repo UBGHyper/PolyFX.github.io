@@ -1,18 +1,3 @@
-// PolyFX Underglow — emissive chassis strip + a soft road-projected glow.
-// ---------------------------------------------------------------------------
-// Deliberately lightweight: no extra lights (zero draw-call/shader-permutation
-// cost per car, safe in multiplayer and on weak GPUs), and no scene scan of its
-// own — it reuses the car discovery CarLights already does every second via
-// car_anchor.js, reading placement straight from `carLights.cars`.
-//
-// The strip is parented to the same chassis mesh car_lights.js uses as its
-// "carrier" (see car_lights.js), so it inherits the car's full per-frame
-// transform including banking/tilt. The road blob is a *decal* — it should
-// stay flat on the ground rather than tilt with the chassis — so it lives
-// directly in the scene and just follows the car's world X/Z each frame; that
-// makes it a world-space approximation rather than a true ground projection
-// (fine for a cosmetic glow, and consistent with "fake blob" being the chosen,
-// cheap approach over real lights).
 
 import * as THREE from './vendor/three.module.js';
 import { radialTexture } from './sky.js';
@@ -28,12 +13,12 @@ export class Underglow {
     this.enabled = false;
     this.cfg = {
       color: 0x36e0ff,
-      stripIntensity: 1.4, // emissive strip brightness multiplier — bloom picks this up
-      blobOpacity: 0.55,   // road glow peak opacity
-      blobRadius: 1.7,     // world units
-      pulse: false,        // gentle time-based breathing brightness (no speed telemetry reaches PolyFX without a new bundle seam, so this is ambient, not speed-reactive)
+      stripIntensity: 1.4,
+      blobOpacity: 0.55,
+      blobRadius: 1.7,
+      pulse: false,
     };
-    this._rigs = new Map(); // carRoot -> { strip, stripMat, blob, blobMat }
+    this._rigs = new Map();
     this._blobTex = null;
   }
 
@@ -96,10 +81,6 @@ export class Underglow {
       const a = car.anchor;
       const width = a.halfWidth * 2;
       const length = Math.abs(a.maxEdge - a.minEdge);
-      // PlaneGeometry(1,1) laid flat via rotation.x=-PI/2: local scale.x maps
-      // to the parent's X axis, scale.y maps to the parent's Z axis — so pick
-      // which extent (length vs. lateral) goes on which scale axis based on
-      // the anchor's own length axis, same convention car_lights.js uses.
       const lengthExtent = length * 0.82, lateralExtent = width * 0.94;
       if (a.lengthAxis === 'x') rig.strip.scale.set(lengthExtent, lateralExtent, 1);
       else rig.strip.scale.set(lateralExtent, lengthExtent, 1);
@@ -109,12 +90,6 @@ export class Underglow {
       pos[a.lateralAxis] = a.centerLateral;
       rig.strip.position.set(pos.x, pos.y, pos.z);
 
-      // Ground tracking for the blob: it's a decal and must NOT float up with
-      // the car during a jump. Track vertical speed (units/sec, so this is
-      // frame-rate independent) to tell "driving over a hill" (small, smooth
-      // Y change -> keep following) from "airborne" (large Y change -> freeze
-      // the decal at the last known ground height and fade it out instead of
-      // letting it trail the car into the air).
       const now = performance.now();
       car.carrier.getWorldPosition(_worldPos);
       if (rig.lastY == null) { rig.lastY = _worldPos.y; rig.groundY = _worldPos.y; rig.lastT = now; }
@@ -130,10 +105,6 @@ export class Underglow {
       const r = this.cfg.blobRadius;
       rig.blob.scale.set(r * 2, r * 2, 1);
 
-      // The strip is glued to the chassis, so it rotates with the car by
-      // design — but a flat additive quad flashing face-on to the camera
-      // during a flip/barrel-roll reads as a bright glitchy panel, not
-      // underglow. Fade it by how "upright" the car currently is instead.
       car.carrier.getWorldQuaternion(_worldQuat);
       _carUp.set(0, 1, 0).applyQuaternion(_worldQuat);
       const uprightness = THREE.MathUtils.clamp(_carUp.dot(WORLD_UP), 0, 1);

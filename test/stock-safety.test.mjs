@@ -1,20 +1,3 @@
-// Guards PolyFX's core promise: with the graphics preset at "Off" (the
-// default with no PolyModLoader present), render() must never touch the
-// renderer/scene at all.
-//
-// This asserts the invariant directly (nothing in PolyFX ever got
-// constructed) rather than comparing screenshots pixel-for-pixel. A pixel
-// comparison was tried first and abandoned: the stock game's own sky/cloud
-// shader is time-animated relative to wall-clock page-load time, so even two
-// mod-ABSENT loads of the same scene produce different pixels in every
-// region of the frame, including the sky — there is no stable baseline to
-// diff against. Checking that _ensure() (which is what would build the
-// composer, sky, car lights, underglow, etc. — see src/runtime.js) never ran
-// is a strictly stronger guarantee anyway: it's the actual code path the
-// screenshot comparison could only ever have been an indirect proxy for.
-//
-// Requires a local app_src/ (see README's local dev setup) — skips if
-// missing, since it's gitignored and not something this repo can ship.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -49,15 +32,8 @@ test('preset Off never constructs any PolyFX rendering state', async (t) => {
 
     await page.goto(`http://127.0.0.1:${port}/index.html`, { waitUntil: 'load', timeout: 30000 });
     await page.waitForFunction(() => typeof window.__PolyFX === 'object' && window.__PolyFX !== null, null, { timeout: 15000 });
-    // No PolyModLoader present -> window.polyModLoader is undefined ->
-    // preset resolves to PRESET.OFF (0) every frame, by design (see
-    // render()'s preset-resolution block in src/runtime.js).
     await page.waitForTimeout(2500);
 
-    // Booleans only — some of these (composer, sky, ...) are complex
-    // Three.js objects with circular references that would fail Playwright's
-    // structured-clone return serialization if they ever turned out to be
-    // non-null, obscuring a real failure behind a serialization error.
     const state = await page.evaluate(() => ({
       composer: !!window.__PolyFX.composer,
       preset: window.__PolyFX.preset,

@@ -1,8 +1,3 @@
-// Serves dist/PolyFX/ so real PolyModLoader can install it as a custom mod
-// URL while there's no public release/ URL yet (see README / plan A4).
-// In PML, add `http://127.0.0.1:<port>` as a custom mod source — PML fetches
-// manifest.json, then <version>/version.json and <version>/main.mod.js from
-// exactly that base, same shape as the real CDN.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createStaticServer, listen } from './static-server.mjs';

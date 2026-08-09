@@ -1,14 +1,3 @@
-// Extracts PolyTrack's app.asar (your own legitimately-owned install — see
-// README) into app_src/, and patches main.bundle.js with the same two seams
-// main.mod.js installs via PolyModLoader mixins, for the direct-bundle-patch
-// dev flavor (app_src/mod/, used by `npm run dev` / `npm run shots`).
-//
-// Exports the mixin tokens + patcher as plain functions so tools/test/*.mjs
-// can verify them against a pristine extraction without going through PML at
-// all — see that file for why exact-match matters: PolyModLoader's
-// registerClassMixin calls `.toString()` on the live function object, which
-// returns the literal source text as shipped (no reformatting), so a token
-// with so much as an extra space silently fails to match.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,12 +18,6 @@ export function verifyMixinTokens(bundleText) {
   return results;
 }
 
-// Finds V.prototype.update's OWN source text via a real parse — mirroring
-// what PolyModLoader's registerClassMixin actually operates on
-// (Function.prototype.toString() of the live method, not the whole bundle
-// file). Identified by content (contains the render call), not by variable
-// name ("V"), since minified names can shift between builds but this
-// specific call site is what we're actually patching.
 export function findUpdateMethodSource(bundleText) {
   const ast = acorn.parse(bundleText, { ecmaVersion: 'latest', sourceType: 'script' });
   let target = null;
@@ -49,18 +32,6 @@ export function findUpdateMethodSource(bundleText) {
   return bundleText.slice(target.start, target.end);
 }
 
-// Finds how to actually REACH the renderer class from PolyModLoader's own
-// eval() scope. A bare "V" identifier doesn't work — see src/main.mod.js's
-// header comment — because V is declared inside its own isolated webpack
-// module closure, not the module PML's getFromPolyTrack eval() runs in. The
-// one thing confirmed reachable from that scope is the shared webpack
-// require function itself (bound to "i" there), which can reach ANY already
-// — or not-yet — instantiated module by numeric id: `i(<id>)`. So this finds
-// (a) which module id declares the class containing update()'s render call,
-// and (b) which of that module's exports (defined via `<require>.d(exports,
-// {Name: () => Alias})`) actually resolves to that same class, by matching
-// a plain `Alias=ClassName` assignment in the module's own source — that's
-// how esbuild aliases a class to its public export name in this bundle.
 export function findRendererAccessPath(bundleText) {
   const ast = acorn.parse(bundleText, { ecmaVersion: 'latest', sourceType: 'script' });
   let result = null;
@@ -77,9 +48,6 @@ export function findRendererAccessPath(bundleText) {
       }
       if (!className) throw new Error('renderer class is not a named ClassDeclaration — bundle format has changed');
 
-      // The webpack module factory: a 3-param function that is the .value of
-      // an ObjectExpression Property (the module map entry `{ <id>: (e,t,n)
-      // => {...} }`), found by walking outward from the method itself.
       let moduleId = null;
       let factoryNode = null;
       for (let i = ancestors.length - 1; i >= 1; i--) {
@@ -119,12 +87,6 @@ export function findRendererAccessPath(bundleText) {
 
 const PML_RECONSTRUCT_REGEX = /^\s*(async\s+)?([\w$]+)\s*\(([^)]*)\)\s*{([\s\S]*)}$/;
 
-// Faithfully replays PolyModLoader's registerClassMixin for INSERT and
-// REPLACEBETWEEN (see PolyModLoader.js) against the real, method-scoped
-// source text — not a whole-file text splice like patchBundle() below. This
-// is what actually caught the tokenEnd bug: patchBundle()'s whole-file
-// approach "worked" because the text it was looking for genuinely exists
-// in the file, just in the wrong method.
 export function simulatePmlMixins(bundleText) {
   let funcStr = findUpdateMethodSource(bundleText);
   if (!PML_RECONSTRUCT_REGEX.test(funcStr)) {
@@ -149,9 +111,6 @@ export function simulatePmlMixins(bundleText) {
     if (!PML_RECONSTRUCT_REGEX.test(funcStr)) throw new Error('REPLACEBETWEEN: reconstructed function no longer matches PolyModLoader\'s regex');
   }
 
-  // Same two mixins as src/main.mod.js, applied in the same order (PML
-  // applies mixins as each registerClassMixin call runs, so the second one
-  // here operates on the output of the first — mirrored here too).
   applyInsert(MIXIN_TOKENS.sunInsert, 'window.__PolyFX?.overrideSun?.((0,i.gn)(this,I,"f"));');
   applyReplaceBetween(
     MIXIN_TOKENS.renderTokenStart,
@@ -174,8 +133,6 @@ export function simulatePmlMixins(bundleText) {
   return funcStr;
 }
 
-// Mirrors main.mod.js's two registerClassMixin calls as plain string
-// surgery, for the flavor that doesn't go through PolyModLoader at all.
 export function patchBundle(bundleText) {
   const counts = verifyMixinTokens(bundleText);
   for (const [name, count] of Object.entries(counts)) {
@@ -184,15 +141,11 @@ export function patchBundle(bundleText) {
 
   let out = bundleText;
 
-  // (a) sun-direction override, right after the sun-position copy.
   out = out.replace(
     MIXIN_TOKENS.sunInsert,
     `${MIXIN_TOKENS.sunInsert}window.__PolyFX?.overrideSun?.((0,i.gn)(this,I,"f"));`,
   );
 
-  // (b) route the render call through PolyFX when present. Replacement ends
-  // with exactly one closing brace for update() itself — nothing needs to be
-  // re-emitted afterward, the next method (addMaterial) was never consumed.
   const startIdx = out.indexOf(MIXIN_TOKENS.renderTokenStart);
   const endIdx = out.indexOf(MIXIN_TOKENS.renderTokenEnd, startIdx);
   const replacement = `window.__PolyFX

@@ -1,7 +1,3 @@
-// Generates report.html for a shotbench run (or a comparison between two
-// runs) — a contact sheet of every captured preset plus a draggable
-// before/after wipe slider. Self-contained (no external requests) so it
-// opens fine straight off disk.
 import fs from 'node:fs';
 import path from 'node:path';
 

@@ -1,16 +1,3 @@
-// PolyFX Car Lights — real headlights + brake-light glow.
-// ---------------------------------------------------------------------------
-// No new bundle seam needed: cars are ordinary Object3D groups added directly
-// to the scene, and the game already tags each car's brake-light mesh with a
-// material named "BrakeLight" (and the body with "Main") — car discovery and
-// the front/rear/lateral anchor are shared with underglow.js via car_anchor.js.
-// Braking state is read straight off the brake material's own emissive
-// colour, which the stock game already toggles.
-//
-// Car *discovery* (the scene.traverse to find BrakeLight-tagged meshes) is
-// NOT done here — runtime.js folds it into one shared per-second scan (also
-// used for lights and the smoke material) and feeds roots in via ingestRoots.
-// This class only fits/lays out/applies state for roots it's handed.
 
 import * as THREE from './vendor/three.module.js';
 import { fitCarAnchor } from './car_anchor.js';
@@ -19,32 +6,14 @@ const _worldPos = new THREE.Vector3();
 
 export class CarLights {
   constructor() {
-    this.cars = new Map(); // carRoot -> { carrier, brakeMesh, brakeMat, brakeSpot, brakeTarget, headL, headR, anchor, origEmissive }
-    this._failed = new WeakSet(); // roots we already tried and gave up on this session
-    // NB: three.js (r155+) lights are photometric — SpotLight intensity is in
-    // candela, so useful values are in the hundreds, unlike the game's own
-    // DirectionalLight/HemisphereLight (irradiance-like, ~1-10).
-    // offsetZ/offsetX/offsetY are FINE-TUNE nudges (additive, local units) on
-    // top of a position auto-derived from the car's own geometry — see _fit().
+    this.cars = new Map();
+    this._failed = new WeakSet();
     this.cfg = {
       enabled: true,
-      offsetX: 0, offsetY: 0, offsetZ: 0, manualFlip: false, // safety override if auto-detected front is ever wrong
+      offsetX: 0, offsetY: 0, offsetZ: 0, manualFlip: false,
       aimDistance: 12, aimDrop: 0.6,
       color: 0xfff2d0, intensity: 220, angle: 0.5, penumbra: 0.6, distance: 22,
-      // brakeLightDistance is the spotlight's range/target reach behind the
-      // car, not just its source offset — 4.0 (the original default) reads as
-      // the glow trailing a car-length or more behind, disproportionate to
-      // typical car length. 2.0 keeps the pool close to the bumper; tune live
-      // via the panel's "Rear range" slider if it still needs adjusting.
       tailGlow: 0.28, brakeBoost: 3.2, brakeLightIntensity: 65, tailLightIntensity: 8, brakeLightDistance: 2.0,
-      // Other cars' (opponents', ghosts', leaderboard replays') headlights —
-      // separate from the player's own, which is always exempt. Also capped
-      // at maxLitOtherCars regardless of this flag: THREE.js still walks
-      // every VISIBLE light in the scene every frame building its lighting
-      // uniforms, and can recompile shaders when the active light count
-      // changes — with no cap, a race with many other cars means dozens of
-      // real-time SpotLights, which tanks perf and can visibly glitch
-      // (shader recompiles showing up as a frame or two of black/garbage).
       otherHeadlightsEnabled: true, maxLitOtherCars: 6,
     };
   }
@@ -54,11 +23,6 @@ export class CarLights {
       if (root.parent !== scene) { this.cars.delete(root); continue; }
     }
 
-    // The player's own car is whichever tracked car is closest to the
-    // active camera — chase/cockpit cameras always sit right on top of it,
-    // and this needs no game-specific tagging to identify it. Distances are
-    // computed once here and reused below for both that and the
-    // closest-others cap.
     let ownRoot = null;
     const entries = [];
     if (camera) {
@@ -87,13 +51,9 @@ export class CarLights {
     if (!on) for (const [, car] of this.cars) this._setHeadIntensity(car, 0);
   }
 
-  // Fed by runtime.js's shared scene scan (see PolyFX._sharedScan).
   ingestRoots(roots) {
     for (const root of roots) {
       if (this.cars.has(root) || this._failed.has(root)) continue;
-      // A single car's setup must never be able to take down the whole render
-      // pipeline (this runs inside PolyFX's per-frame try/catch) — any failure
-      // here is caught, logged once, and that car is skipped, not retried.
       try { this._fit(root); }
       catch (e) { console.warn('[PolyFX] car light setup failed, skipping this car:', e); this._failed.add(root); }
     }
@@ -109,7 +69,7 @@ export class CarLights {
 
     const mkSpot = (color) => {
       const spot = new THREE.SpotLight(color, 0, 1, 0.5, 0.6, 1.2);
-      spot.visible = false; // update() sets this correctly every frame — see its header comment on why .visible matters
+      spot.visible = false;
       spot.userData.__polyfxOwned = true;
       const target = new THREE.Object3D();
       spot.target = target;
@@ -135,7 +95,7 @@ export class CarLights {
     const frontEdge = frontSign > 0 ? a.maxEdge : a.minEdge;
     for (const h of [car.headL, car.headR]) {
       const lateral = a.centerLateral + h.sideSign * a.halfWidth * 0.62 + h.sideSign * c.offsetX;
-      const along = frontEdge + frontSign * (0.12 + c.offsetZ); // just outside the body, not embedded in it
+      const along = frontEdge + frontSign * (0.12 + c.offsetZ);
       const y = a.bumperY + c.offsetY;
       const pos = { x: 0, y, z: 0 };
       pos[a.lengthAxis] = along; pos[a.lateralAxis] = lateral;
@@ -151,15 +111,12 @@ export class CarLights {
     }
   }
 
-  // Brake glow: a SpotLight aimed BACKWARD and slightly down, at the rear edge
-  // — not an omnidirectional PointLight, which was spilling light in every
-  // direction including forward, under the chassis ("washing" under the car).
   _layoutBrake(car) {
     const c = this.cfg, a = car.anchor;
     const frontSign = a.frontSign * (c.manualFlip ? -1 : 1);
     const rearSign = -frontSign;
     const rearEdge = rearSign > 0 ? a.maxEdge : a.minEdge;
-    const along = rearEdge + rearSign * 0.10; // just outside the body
+    const along = rearEdge + rearSign * 0.10;
     const y = a.bumperY + 0.04;
 
     const pos = { x: 0, y, z: 0 };
@@ -172,15 +129,10 @@ export class CarLights {
     car.brakeTarget.position.set(tgt.x, tgt.y, tgt.z);
 
     car.brakeSpot.distance = c.brakeLightDistance;
-    car.brakeSpot.angle = 0.9;      // wide, soft glow rather than a tight beam
+    car.brakeSpot.angle = 0.9;
     car.brakeSpot.penumbra = 1.0;
   }
 
-  // .visible matters, not just .intensity===0: THREE.js still walks every
-  // VISIBLE light building its per-frame lighting uniforms (and can
-  // recompile shaders when the active light count changes) regardless of
-  // intensity — an "off" light left visible still costs exactly as much as
-  // a lit one. See update()'s header comment.
   _setHeadIntensity(car, v) {
     car.headL.spot.intensity = v; car.headL.spot.visible = v > 0;
     car.headR.spot.intensity = v; car.headR.spot.visible = v > 0;
@@ -192,7 +144,6 @@ export class CarLights {
 
   _applyBrake(car, tailOn) {
     if (!car.brakeMat) return;
-    // The stock game marks active braking by setting emissive red before render.
     const braking = car.brakeMat.emissive.r > 0.5;
     if (braking) {
       car.brakeMat.emissive.setRGB(1, 0.34, 0.22);
@@ -215,8 +166,6 @@ export class CarLights {
     for (const [, car] of this.cars) { this._layoutHeads(car); this._layoutBrake(car); }
   }
 
-  // Zero every light without removing them (cheap, reversible) — used when the
-  // composer/atmosphere is off so no car keeps glowing from a stale state.
   disableAll() {
     for (const [, car] of this.cars) {
       this._setHeadIntensity(car, 0);

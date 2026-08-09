@@ -10,28 +10,12 @@ import {
 import { Pass, FullScreenQuad } from './Pass.js';
 import { SMAABlendShader, SMAAEdgesShader, SMAAWeightsShader } from '../shaders/SMAAShader.js';
 
-/**
- * A pass for applying SMAA. Unlike {@link FXAAPass}, `SMAAPass` operates in
- * `linear-srgb` so this pass must be executed before {@link OutputPass}.
- *
- * ```js
- * const smaaPass = new SMAAPass();
- * composer.addPass( smaaPass );
- * ```
- *
- * @augments Pass
- * @three_import import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
- */
 class SMAAPass extends Pass {
 
-	/**
-	 * Constructs a new SMAA pass.
-	 */
 	constructor( ) {
 
 		super();
 
-		// render targets
 
 		this._edgesRT = new WebGLRenderTarget( 1, 1, {
 			depthBuffer: false,
@@ -45,14 +29,12 @@ class SMAAPass extends Pass {
 		} );
 		this._weightsRT.texture.name = 'SMAAPass.weights';
 
-		// textures
 		const scope = this;
 
 		const areaTextureImage = new Image();
 		areaTextureImage.src = this._getAreaTexture();
 		areaTextureImage.onload = function () {
 
-			// assigning data to HTMLImageElement.src is asynchronous (see #15162)
 			scope._areaTexture.needsUpdate = true;
 
 		};
@@ -68,7 +50,6 @@ class SMAAPass extends Pass {
 		searchTextureImage.src = this._getSearchTexture();
 		searchTextureImage.onload = function () {
 
-			// assigning data to HTMLImageElement.src is asynchronous (see #15162)
 			scope._searchTexture.needsUpdate = true;
 
 		};
@@ -81,7 +62,6 @@ class SMAAPass extends Pass {
 		this._searchTexture.generateMipmaps = false;
 		this._searchTexture.flipY = false;
 
-		// materials - pass 1
 
 		this._uniformsEdges = UniformsUtils.clone( SMAAEdgesShader.uniforms );
 
@@ -92,7 +72,6 @@ class SMAAPass extends Pass {
 			fragmentShader: SMAAEdgesShader.fragmentShader
 		} );
 
-		// materials - pass 2
 
 		this._uniformsWeights = UniformsUtils.clone( SMAAWeightsShader.uniforms );
 
@@ -107,7 +86,6 @@ class SMAAPass extends Pass {
 			fragmentShader: SMAAWeightsShader.fragmentShader
 		} );
 
-		// materials - pass 3
 
 		this._uniformsBlend = UniformsUtils.clone( SMAABlendShader.uniforms );
 		this._uniformsBlend[ 'tDiffuse' ].value = this._weightsRT.texture;
@@ -122,20 +100,8 @@ class SMAAPass extends Pass {
 
 	}
 
-	/**
-	 * Performs the SMAA pass.
-	 *
-	 * @param {WebGLRenderer} renderer - The renderer.
-	 * @param {WebGLRenderTarget} writeBuffer - The write buffer. This buffer is intended as the rendering
-	 * destination for the pass.
-	 * @param {WebGLRenderTarget} readBuffer - The read buffer. The pass can access the result from the
-	 * previous pass from this buffer.
-	 * @param {number} deltaTime - The delta time in seconds.
-	 * @param {boolean} maskActive - Whether masking is active or not.
-	 */
-	render( renderer, writeBuffer, readBuffer/*, deltaTime, maskActive*/ ) {
+	render( renderer, writeBuffer, readBuffer ) {
 
-		// pass 1
 
 		this._uniformsEdges[ 'tDiffuse' ].value = readBuffer.texture;
 
@@ -145,7 +111,6 @@ class SMAAPass extends Pass {
 		if ( this.clear ) renderer.clear();
 		this._fsQuad.render( renderer );
 
-		// pass 2
 
 		this._fsQuad.material = this._materialWeights;
 
@@ -153,7 +118,6 @@ class SMAAPass extends Pass {
 		if ( this.clear ) renderer.clear();
 		this._fsQuad.render( renderer );
 
-		// pass 3
 
 		this._uniformsBlend[ 'tColor' ].value = readBuffer.texture;
 
@@ -174,12 +138,6 @@ class SMAAPass extends Pass {
 
 	}
 
-	/**
-	 * Sets the size of the pass.
-	 *
-	 * @param {number} width - The width to set.
-	 * @param {number} height - The height to set.
-	 */
 	setSize( width, height ) {
 
 		this._edgesRT.setSize( width, height );
@@ -191,10 +149,6 @@ class SMAAPass extends Pass {
 
 	}
 
-	/**
-	 * Frees the GPU-related resources allocated by this instance. Call this
-	 * method whenever the pass is no longer used in your app.
-	 */
 	dispose() {
 
 		this._edgesRT.dispose();
@@ -211,7 +165,6 @@ class SMAAPass extends Pass {
 
 	}
 
-	// internals
 
 	_getAreaTexture() {
 

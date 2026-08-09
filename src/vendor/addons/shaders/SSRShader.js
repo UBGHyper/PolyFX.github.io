@@ -4,22 +4,7 @@ import {
 } from '../../three.module.js';
 
 
-/**
- * A collection of shaders used for SSR.
- *
- * References:
- * - [3D Game Shaders For Beginners, Screen Space Reflection (SSR)](https://lettier.github.io/3d-game-shaders-for-beginners/screen-space-reflection.html).
- *
- * @module SSRShader
- * @three_import import * as SSRShader from 'three/addons/shaders/SSRShader.js';
- */
 
-/**
- * SSR shader.
- *
- * @constant
- * @type {ShaderMaterial~Shader}
- */
 const SSRShader = {
 
 	name: 'SSRShader',
@@ -51,7 +36,7 @@ const SSRShader = {
 
 	},
 
-	vertexShader: /* glsl */`
+	vertexShader:`
 
 		varying vec2 vUv;
 
@@ -65,7 +50,7 @@ const SSRShader = {
 
 	`,
 
-	fragmentShader: /* glsl */`
+	fragmentShader:`
 		// precision highp float;
 		precision highp sampler2D;
 		varying vec2 vUv;
@@ -246,12 +231,6 @@ const SSRShader = {
 
 };
 
-/**
- * SSR Depth shader.
- *
- * @constant
- * @type {ShaderMaterial~Shader}
- */
 const SSRDepthShader = {
 
 	name: 'SSRDepthShader',
@@ -268,7 +247,7 @@ const SSRDepthShader = {
 
 	},
 
-	vertexShader: /* glsl */`
+	vertexShader:`
 
 		varying vec2 vUv;
 
@@ -281,7 +260,7 @@ const SSRDepthShader = {
 
 	`,
 
-	fragmentShader: /* glsl */`
+	fragmentShader:`
 
 		uniform sampler2D tDepth;
 
@@ -321,12 +300,6 @@ const SSRDepthShader = {
 
 };
 
-/**
- * SSR Blur shader.
- *
- * @constant
- * @type {ShaderMaterial~Shader}
- */
 const SSRBlurShader = {
 
 	name: 'SSRBlurShader',
@@ -339,7 +312,7 @@ const SSRBlurShader = {
 
 	},
 
-	vertexShader: /* glsl */`
+	vertexShader:`
 
 		varying vec2 vUv;
 
@@ -352,7 +325,7 @@ const SSRBlurShader = {
 
 	`,
 
-	fragmentShader: /* glsl */`
+	fragmentShader:`
 
 		uniform sampler2D tDiffuse;
 		uniform vec2 resolution;

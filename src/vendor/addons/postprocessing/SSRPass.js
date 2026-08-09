@@ -19,118 +19,32 @@ import { Pass, FullScreenQuad } from './Pass.js';
 import { SSRBlurShader, SSRDepthShader, SSRShader } from '../shaders/SSRShader.js';
 import { CopyShader } from '../shaders/CopyShader.js';
 
-/**
- * A pass for a basic SSR effect.
- *
- * ```js
- * const ssrPass = new SSRPass( {
- * 	renderer,
- * 	scene,
- * 	camera,
- * 	width: innerWidth,
- * 	height: innerHeight
- * } );
- * composer.addPass( ssrPass );
- * ```
- *
- * @augments Pass
- * @three_import import { SSRPass } from 'three/addons/postprocessing/SSRPass.js';
- */
 class SSRPass extends Pass {
 
-	/**
-	 * Constructs a new SSR pass.
-	 *
-	 * @param {SSRPass~Options} options - The pass options.
-	 */
 	constructor( { renderer, scene, camera, width = 512, height = 512, selects = null, bouncing = false, groundReflector = null } ) {
 
 		super();
 
-		/**
-		 * The width of the effect.
-		 *
-		 * @type {number}
-		 * @default 512
-		 */
 		this.width = width;
 
-		/**
-		 * The height of the effect.
-		 *
-		 * @type {number}
-		 * @default 512
-		 */
 		this.height = height;
 
-		/**
-		 * Overwritten to perform a clear operation by default.
-		 *
-		 * @type {boolean}
-		 * @default true
-		 */
 		this.clear = true;
 
-		/**
-		 * The renderer.
-		 *
-		 * @type {WebGLRenderer}
-		 */
 		this.renderer = renderer;
 
-		/**
-		 * The scene to render.
-		 *
-		 * @type {Scene}
-		 */
 		this.scene = scene;
 
-		/**
-		 * The camera.
-		 *
-		 * @type {Camera}
-		 */
 		this.camera = camera;
 
-		/**
-		 * The ground reflector.
-		 *
-		 * @type {?ReflectorForSSRPass}
-		 * @default 0
-		 */
 		this.groundReflector = groundReflector;
 
-		/**
-		 * The opacity.
-		 *
-		 * @type {number}
-		 * @default 0.5
-		 */
 		this.opacity = SSRShader.uniforms.opacity.value;
 
-		/**
-		 * The output configuration.
-		 *
-		 * @type {number}
-		 * @default 0
-		 */
 		this.output = 0;
 
-		/**
-		 * Controls how far a fragment can reflect.
-		 *
-		 * @type {number}
-		 * @default 180
-		 */
 		this.maxDistance = SSRShader.uniforms.maxDistance.value;
 
-		/**
-		 * Controls the cutoff between what counts as a
-		 * possible reflection hit and what does not.
-		 *
-		 * @type {number}
-		 * @default .018
-		 */
 		this.thickness = SSRShader.uniforms.thickness.value;
 
 		this.tempColor = new Color();
@@ -139,21 +53,8 @@ class SSRPass extends Pass {
 
 		this._resolutionScale = 1;
 
-		/**
-		 * Whether the pass is selective or not.
-		 *
-		 * @type {boolean}
-		 * @default false
-		 */
 		this.selective = Array.isArray( this._selects );
 
-		/**
-		 * Which 3D objects should be affected by SSR. If not set, the entire scene is affected.
-		 *
-		 * @name SSRPass#selects
-		 * @type {?Array<Object3D>}
-		 * @default null
-		 */
 		Object.defineProperty( this, 'selects', {
 			get() {
 
@@ -183,13 +84,6 @@ class SSRPass extends Pass {
 
 		this._bouncing = bouncing;
 
-		/**
-		 * Whether bouncing is enabled or not.
-		 *
-		 * @name SSRPass#bouncing
-		 * @type {boolean}
-		 * @default false
-		 */
 		Object.defineProperty( this, 'bouncing', {
 			get() {
 
@@ -213,23 +107,10 @@ class SSRPass extends Pass {
 			}
 		} );
 
-		/**
-		 * Whether to blur reflections or not.
-		 *
-		 * @type {boolean}
-		 * @default true
-		 */
 		this.blur = true;
 
 		this._distanceAttenuation = SSRShader.defines.DISTANCE_ATTENUATION;
 
-		/**
-		 * Whether to use distance attenuation or not.
-		 *
-		 * @name SSRPass#distanceAttenuation
-		 * @type {boolean}
-		 * @default true
-		 */
 		Object.defineProperty( this, 'distanceAttenuation', {
 			get() {
 
@@ -249,13 +130,6 @@ class SSRPass extends Pass {
 
 		this._fresnel = SSRShader.defines.FRESNEL;
 
-		/**
-		 * Whether to use fresnel or not.
-		 *
-		 * @name SSRPass#fresnel
-		 * @type {boolean}
-		 * @default true
-		 */
 		Object.defineProperty( this, 'fresnel', {
 			get() {
 
@@ -274,13 +148,6 @@ class SSRPass extends Pass {
 
 		this._infiniteThick = SSRShader.defines.INFINITE_THICK;
 
-		/**
-		 * Whether to use infinite thickness or not.
-		 *
-		 * @name SSRPass#infiniteThick
-		 * @type {boolean}
-		 * @default false
-		 */
 		Object.defineProperty( this, 'infiniteThick', {
 			get() {
 
@@ -297,7 +164,6 @@ class SSRPass extends Pass {
 			}
 		} );
 
-		// beauty render target with depth buffer
 
 		const depthTexture = new DepthTexture();
 		depthTexture.type = UnsignedShortType;
@@ -312,13 +178,11 @@ class SSRPass extends Pass {
 			depthBuffer: true
 		} );
 
-		//for bouncing
 		this.prevRenderTarget = new WebGLRenderTarget( this.width, this.height, {
 			minFilter: NearestFilter,
 			magFilter: NearestFilter
 		} );
 
-		// normal render target
 
 		this.normalRenderTarget = new WebGLRenderTarget( this.width, this.height, {
 			minFilter: NearestFilter,
@@ -326,7 +190,6 @@ class SSRPass extends Pass {
 			type: HalfFloatType,
 		} );
 
-		// metalness render target
 
 		this.metalnessRenderTarget = new WebGLRenderTarget( this.width, this.height, {
 			minFilter: NearestFilter,
@@ -336,7 +199,6 @@ class SSRPass extends Pass {
 
 
 
-		// ssr render target
 
 		this.ssrRenderTarget = new WebGLRenderTarget( this.width, this.height, {
 			minFilter: NearestFilter,
@@ -345,9 +207,7 @@ class SSRPass extends Pass {
 
 		this.blurRenderTarget = this.ssrRenderTarget.clone();
 		this.blurRenderTarget2 = this.ssrRenderTarget.clone();
-		// this.blurRenderTarget3 = this.ssrRenderTarget.clone();
 
-		// ssr material
 
 		this.ssrMaterial = new ShaderMaterial( {
 			defines: Object.assign( {}, SSRShader.defines, {
@@ -372,24 +232,20 @@ class SSRPass extends Pass {
 		this.ssrMaterial.uniforms[ 'cameraProjectionMatrix' ].value.copy( this.camera.projectionMatrix );
 		this.ssrMaterial.uniforms[ 'cameraInverseProjectionMatrix' ].value.copy( this.camera.projectionMatrixInverse );
 
-		// normal material
 
 		this.normalMaterial = new MeshNormalMaterial();
 		this.normalMaterial.blending = NoBlending;
 
-		// metalnessOn material
 
 		this.metalnessOnMaterial = new MeshBasicMaterial( {
 			color: 'white'
 		} );
 
-		// metalnessOff material
 
 		this.metalnessOffMaterial = new MeshBasicMaterial( {
 			color: 'black'
 		} );
 
-		// blur material
 
 		this.blurMaterial = new ShaderMaterial( {
 			defines: Object.assign( {}, SSRBlurShader.defines ),
@@ -400,7 +256,6 @@ class SSRPass extends Pass {
 		this.blurMaterial.uniforms[ 'tDiffuse' ].value = this.ssrRenderTarget.texture;
 		this.blurMaterial.uniforms[ 'resolution' ].value.set( this.width, this.height );
 
-		// blur material 2
 
 		this.blurMaterial2 = new ShaderMaterial( {
 			defines: Object.assign( {}, SSRBlurShader.defines ),
@@ -411,18 +266,8 @@ class SSRPass extends Pass {
 		this.blurMaterial2.uniforms[ 'tDiffuse' ].value = this.blurRenderTarget.texture;
 		this.blurMaterial2.uniforms[ 'resolution' ].value.set( this.width, this.height );
 
-		// // blur material 3
 
-		// this.blurMaterial3 = new ShaderMaterial({
-		//   defines: Object.assign({}, SSRBlurShader.defines),
-		//   uniforms: UniformsUtils.clone(SSRBlurShader.uniforms),
-		//   vertexShader: SSRBlurShader.vertexShader,
-		//   fragmentShader: SSRBlurShader.fragmentShader
-		// });
-		// this.blurMaterial3.uniforms['tDiffuse'].value = this.blurRenderTarget2.texture;
-		// this.blurMaterial3.uniforms['resolution'].value.set(this.width, this.height);
 
-		// material for rendering the depth
 
 		this.depthRenderMaterial = new ShaderMaterial( {
 			defines: Object.assign( {}, SSRDepthShader.defines ),
@@ -435,7 +280,6 @@ class SSRPass extends Pass {
 		this.depthRenderMaterial.uniforms[ 'cameraNear' ].value = this.camera.near;
 		this.depthRenderMaterial.uniforms[ 'cameraFar' ].value = this.camera.far;
 
-		// material for rendering the content of a render target
 
 		this.copyMaterial = new ShaderMaterial( {
 			uniforms: UniformsUtils.clone( CopyShader.uniforms ),
@@ -450,7 +294,6 @@ class SSRPass extends Pass {
 			blendSrcAlpha: SrcAlphaFactor,
 			blendDstAlpha: OneMinusSrcAlphaFactor,
 			blendEquationAlpha: AddEquation,
-			// premultipliedAlpha:true,
 		} );
 
 		this.fsQuad = new FullScreenQuad( null );
@@ -460,15 +303,6 @@ class SSRPass extends Pass {
 	}
 
 
-	/**
-	 * The resolution scale. Valid values are in the range
-	 * `[0,1]`. `1` means best quality but also results in
-	 * more computational overhead. Setting to `0.5` means
-	 * the effect is computed in half-resolution.
-	 *
-	 * @type {number}
-	 * @default 1
-	 */
 	get resolutionScale() {
 
 		return this._resolutionScale;
@@ -478,17 +312,12 @@ class SSRPass extends Pass {
 	set resolutionScale( value ) {
 
 		this._resolutionScale = value;
-		this.setSize( this.width, this.height ); // force a resize when resolution scaling changes
+		this.setSize( this.width, this.height );
 
 	}
 
-	/**
-	 * Frees the GPU-related resources allocated by this instance. Call this
-	 * method whenever the pass is no longer used in your app.
-	 */
 	dispose() {
 
-		// dispose render targets
 
 		this.beautyRenderTarget.dispose();
 		this.prevRenderTarget.dispose();
@@ -497,9 +326,7 @@ class SSRPass extends Pass {
 		this.ssrRenderTarget.dispose();
 		this.blurRenderTarget.dispose();
 		this.blurRenderTarget2.dispose();
-		// this.blurRenderTarget3.dispose();
 
-		// dispose materials
 
 		this.normalMaterial.dispose();
 		this.metalnessOnMaterial.dispose();
@@ -509,26 +336,13 @@ class SSRPass extends Pass {
 		this.copyMaterial.dispose();
 		this.depthRenderMaterial.dispose();
 
-		// dispose full screen quad
 
 		this.fsQuad.dispose();
 
 	}
 
-	/**
-	 * Performs the SSR pass.
-	 *
-	 * @param {WebGLRenderer} renderer - The renderer.
-	 * @param {WebGLRenderTarget} writeBuffer - The write buffer. This buffer is intended as the rendering
-	 * destination for the pass.
-	 * @param {WebGLRenderTarget} readBuffer - The read buffer. The pass can access the result from the
-	 * previous pass from this buffer.
-	 * @param {number} deltaTime - The delta time in seconds.
-	 * @param {boolean} maskActive - Whether masking is active or not.
-	 */
-	render( renderer, writeBuffer /*, readBuffer, deltaTime, maskActive */ ) {
+	render( renderer, writeBuffer ) {
 
-		// render beauty and depth
 
 		renderer.setRenderTarget( this.beautyRenderTarget );
 		renderer.clear();
@@ -543,11 +357,9 @@ class SSRPass extends Pass {
 		renderer.render( this.scene, this.camera );
 		if ( this.groundReflector ) this.groundReflector.visible = false;
 
-		// render normals
 
 		this._renderOverride( renderer, this.normalMaterial, this.normalRenderTarget, 0, 0 );
 
-		// render metalnesses
 
 		if ( this.selective ) {
 
@@ -555,7 +367,6 @@ class SSRPass extends Pass {
 
 		}
 
-		// render SSR
 
 		this.ssrMaterial.uniforms[ 'opacity' ].value = this.opacity;
 		this.ssrMaterial.uniforms[ 'maxDistance' ].value = this.maxDistance;
@@ -563,17 +374,14 @@ class SSRPass extends Pass {
 		this._renderPass( renderer, this.ssrMaterial, this.ssrRenderTarget );
 
 
-		// render blur
 
 		if ( this.blur ) {
 
 			this._renderPass( renderer, this.blurMaterial, this.blurRenderTarget );
 			this._renderPass( renderer, this.blurMaterial2, this.blurRenderTarget2 );
-			// this._renderPass(renderer, this.blurMaterial3, this.blurRenderTarget3);
 
 		}
 
-		// output result to screen
 
 		switch ( this.output ) {
 
@@ -675,12 +483,6 @@ class SSRPass extends Pass {
 
 	}
 
-	/**
-	 * Sets the size of the pass.
-	 *
-	 * @param {number} width - The width to set.
-	 * @param {number} height - The height to set.
-	 */
 	setSize( width, height ) {
 
 		this.width = width;
@@ -699,7 +501,6 @@ class SSRPass extends Pass {
 		this.prevRenderTarget.setSize( effectiveWidth, effectiveHeight );
 		this.blurRenderTarget.setSize( effectiveWidth, effectiveHeight );
 		this.blurRenderTarget2.setSize( effectiveWidth, effectiveHeight );
-		// this.blurRenderTarget3.setSize(width, height);
 
 		this.ssrMaterial.uniforms[ 'resolution' ].value.set( effectiveWidth, effectiveHeight );
 		this.ssrMaterial.uniforms[ 'cameraProjectionMatrix' ].value.copy( this.camera.projectionMatrix );
@@ -710,18 +511,15 @@ class SSRPass extends Pass {
 
 	}
 
-	// internals
 
 	_renderPass( renderer, passMaterial, renderTarget, clearColor, clearAlpha ) {
 
-		// save original state
 		this.originalClearColor.copy( renderer.getClearColor( this.tempColor ) );
 		const originalClearAlpha = renderer.getClearAlpha( this.tempColor );
 		const originalAutoClear = renderer.autoClear;
 
 		renderer.setRenderTarget( renderTarget );
 
-		// setup pass state
 		renderer.autoClear = false;
 		if ( ( clearColor !== undefined ) && ( clearColor !== null ) ) {
 
@@ -734,7 +532,6 @@ class SSRPass extends Pass {
 		this.fsQuad.material = passMaterial;
 		this.fsQuad.render( renderer );
 
-		// restore original state
 		renderer.autoClear = originalAutoClear;
 		renderer.setClearColor( this.originalClearColor );
 		renderer.setClearAlpha( originalClearAlpha );
@@ -765,7 +562,6 @@ class SSRPass extends Pass {
 		renderer.render( this.scene, this.camera );
 		this.scene.overrideMaterial = null;
 
-		// restore original state
 
 		renderer.autoClear = originalAutoClear;
 		renderer.setClearColor( this.originalClearColor );
@@ -818,7 +614,6 @@ class SSRPass extends Pass {
 
 		} );
 
-		// restore original state
 
 		renderer.autoClear = originalAutoClear;
 		renderer.setClearColor( this.originalClearColor );
@@ -830,19 +625,6 @@ class SSRPass extends Pass {
 
 }
 
-/**
- * Constructor options of `SSRPass`.
- *
- * @typedef {Object} SSRPass~Options
- * @property {WebGLRenderer} renderer - The renderer.
- * @property {Scene} scene - The scene to render.
- * @property {Camera} camera - The camera.
- * @property {number} [width=512] - The width of the effect.
- * @property {number} [height=512] - The width of the effect.
- * @property {?Array<Object3D>} [selects=null] - Which 3D objects should be affected by SSR. If not set, the entire scene is affected.
- * @property {boolean} [bouncing=false] - Whether bouncing is enabled or not.
- * @property {?ReflectorForSSRPass} [groundReflector=null] - A ground reflector.
- **/
 
 SSRPass.OUTPUT = {
 	'Default': 0,

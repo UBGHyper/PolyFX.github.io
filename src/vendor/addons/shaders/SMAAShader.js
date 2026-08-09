@@ -2,23 +2,7 @@ import {
 	Vector2
 } from '../../three.module.js';
 
-/**
- * WebGL port of Subpixel Morphological Antialiasing (SMAA) v2.8
- * Preset: SMAA 1x Medium (with color edge detection)
- *
- * References:
- * - {@link https://github.com/iryoku/smaa/releases/tag/v2.8}
- *
- * @module SMAAShader
- * @three_import import { SMAAShader } from 'three/addons/shaders/SMAAShader.js';
- */
 
-/**
- * SMAA Edges shader.
- *
- * @constant
- * @type {ShaderMaterial~Shader}
- */
 const SMAAEdgesShader = {
 
 	name: 'SMAAEdgesShader',
@@ -36,7 +20,7 @@ const SMAAEdgesShader = {
 
 	},
 
-	vertexShader: /* glsl */`
+	vertexShader:`
 
 		uniform vec2 resolution;
 
@@ -59,7 +43,7 @@ const SMAAEdgesShader = {
 
 		}`,
 
-	fragmentShader: /* glsl */`
+	fragmentShader:`
 
 		uniform sampler2D tDiffuse;
 
@@ -126,12 +110,6 @@ const SMAAEdgesShader = {
 
 };
 
-/**
- * SMAA Weights shader.
- *
- * @constant
- * @type {ShaderMaterial~Shader}
- */
 const SMAAWeightsShader = {
 
 	name: 'SMAAWeightsShader',
@@ -154,7 +132,7 @@ const SMAAWeightsShader = {
 
 	},
 
-	vertexShader: /* glsl */`
+	vertexShader:`
 
 		uniform vec2 resolution;
 
@@ -184,7 +162,7 @@ const SMAAWeightsShader = {
 
 		}`,
 
-	fragmentShader: /* glsl */`
+	fragmentShader:`
 
 		#define SMAASampleLevelZeroOffset( tex, coord, offset ) texture2D( tex, coord + float( offset ) * resolution, 0.0 )
 
@@ -388,12 +366,6 @@ const SMAAWeightsShader = {
 
 };
 
-/**
- * SMAA Blend shader.
- *
- * @constant
- * @type {ShaderMaterial~Shader}
- */
 const SMAABlendShader = {
 
 	name: 'SMAABlendShader',
@@ -406,7 +378,7 @@ const SMAABlendShader = {
 
 	},
 
-	vertexShader: /* glsl */`
+	vertexShader:`
 
 		uniform vec2 resolution;
 
@@ -428,7 +400,7 @@ const SMAABlendShader = {
 
 		}`,
 
-	fragmentShader: /* glsl */`
+	fragmentShader:`
 
 		uniform sampler2D tDiffuse;
 		uniform sampler2D tColor;

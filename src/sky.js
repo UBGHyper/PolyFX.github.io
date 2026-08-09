@@ -1,26 +1,18 @@
-// PolyFX Atmosphere — a real day/night system.
-// ---------------------------------------------------------------------------
-// Drives the sun direction from a time of day, renders an atmospheric sky dome
-// (Rayleigh/Mie scattering) plus a procedural cloud layer, relights the scene
-// (directional + hemisphere lights, fog), and rebuilds a sky-matched reflection
-// environment map so reflections match the time of day.
 
 import * as THREE from './vendor/three.module.js';
 import { Sky } from './vendor/addons/objects/Sky.js';
 
 const DEG = Math.PI / 180;
 
-// Sun unit direction for a given hour (0..24). Sunrise ~6h, sunset ~18h.
 export function sunDirForHour(h) {
-  const t = (h - 6) / 12;                     // 0 at sunrise, 1 at sunset
-  const ang = t * Math.PI;                    // 0..PI across the day
-  const elev = Math.sin(ang) * 78 * DEG;      // negative below horizon at night
-  const azi = (t - 0.5) * Math.PI * 0.9;      // sweep E→W, 0 at noon
+  const t = (h - 6) / 12;
+  const ang = t * Math.PI;
+  const elev = Math.sin(ang) * 78 * DEG;
+  const azi = (t - 0.5) * Math.PI * 0.9;
   const ch = Math.cos(elev);
   return new THREE.Vector3(ch * Math.sin(azi), Math.sin(elev), -ch * Math.cos(azi)).normalize();
 }
 
-// Colour/intensity keyframes by sun elevation (y of the unit sun direction).
 function stop(sunC, sunI, skyC, grndC, hemiI, fogC, cloudC, sky) {
   return {
     sun: new THREE.Color(...sunC), sunI,
@@ -52,8 +44,6 @@ function sampleSky(elevY) {
   return DAY;
 }
 
-// Soft radial-gradient circle texture, generated on a canvas (no asset needed).
-// Shared with underglow.js for its road-blob decal.
 export function radialTexture(inner, outer, stops) {
   const size = 128, c = document.createElement('canvas');
   c.width = c.height = size;
@@ -67,13 +57,12 @@ export function radialTexture(inner, outer, stops) {
   return tex;
 }
 
-// Procedural cloud layer: fbm noise projected onto a sky-plane, scrolling.
 const CloudShader = {
   uniforms: {
     uTime: { value: 0 }, uCoverage: { value: 0.44 }, uOpacity: { value: 0.85 },
     uColor: { value: new THREE.Color(1, 1, 1) }, uColorDark: { value: new THREE.Color(0.6, 0.63, 0.7) },
   },
-  vertexShader: /* glsl */`
+  vertexShader:`
     varying vec3 vDir;
     void main() {
       vDir = normalize(position);
@@ -81,7 +70,7 @@ const CloudShader = {
       gl_Position.z = gl_Position.w; // pin to the far plane so the game's near far clip never culls the clouds
     }
   `,
-  fragmentShader: /* glsl */`
+  fragmentShader:`
     varying vec3 vDir;
     uniform float uTime, uCoverage, uOpacity;
     uniform vec3 uColor, uColorDark;
@@ -114,7 +103,7 @@ export class SkySystem {
     this.sunDir = new THREE.Vector3(0, 1, 0);
     this.moonDir = new THREE.Vector3(0, 1, 0);
     this.envTexture = null;
-    this.ambientTint = new THREE.Color(1, 1, 1); // current scene brightness/colour — for unlit effects (e.g. smoke) that ignore real lights
+    this.ambientTint = new THREE.Color(1, 1, 1);
     this._attached = null;
     this._orig = null;
     this._origLights = null;
@@ -122,8 +111,8 @@ export class SkySystem {
     this._envHour = -999;
     this._envT = 0;
     this._envRT = null;
-    this._nativeSky = undefined; // undefined = not yet scanned, null = none found
-    this._fullEngaged = false; // whether the visible dome/clouds/relight are currently applied (vs envOnly)
+    this._nativeSky = undefined;
+    this._fullEngaged = false;
 
     this.sky = new Sky();
     this.sky.scale.setScalar(450000);
@@ -139,13 +128,8 @@ export class SkySystem {
     this.clouds = new THREE.Mesh(cloudGeo, this.cloudMat);
     this.clouds.renderOrder = -2.5;
 
-    // Moon billboard and star field sit at a real distance WITHIN the game's
-    // camera far plane (maxViewDistance = 10000) — unlike the sky/cloud dome,
-    // Sprite/Points materials don't support the "pin to far plane" trick, so
-    // anything placed further out would be silently frustum-culled.
     const SKY_RADIUS = 9000;
 
-    // Moon billboard.
     const moonTex = radialTexture(0, 0.5, [[0, 'rgba(255,255,250,1)'], [0.6, 'rgba(255,255,250,0.9)'], [1, 'rgba(255,255,250,0)']]);
     this.moonMat = new THREE.SpriteMaterial({ map: moonTex, color: 0xffffff, transparent: true, depthWrite: false, fog: false, opacity: 0 });
     this.moon = new THREE.Sprite(this.moonMat);
@@ -153,17 +137,14 @@ export class SkySystem {
     this.moon.renderOrder = -2.8;
     this._moonDist = SKY_RADIUS;
 
-    // Moon light (dim, cool). Tagged so our own light-scan (which recolors the
-    // game's sun light to match time of day) skips over it.
     this.moonLight = new THREE.DirectionalLight(0x8fa8ff, 0);
     this.moonLight.userData.__polyfxOwned = true;
     this._moonLightAdded = false;
 
-    // Star field: sprinkled points on the upper hemisphere, faded in at night.
     const starCount = 700, starPos = new Float32Array(starCount * 3);
     for (let i = 0; i < starCount; i++) {
       const u = Math.random(), v = Math.random();
-      const theta = 2 * Math.PI * u, phi = Math.acos(1 - v * 0.92); // upper hemisphere-ish
+      const theta = 2 * Math.PI * u, phi = Math.acos(1 - v * 0.92);
       starPos[i * 3] = SKY_RADIUS * Math.sin(phi) * Math.cos(theta);
       starPos[i * 3 + 1] = SKY_RADIUS * Math.cos(phi);
       starPos[i * 3 + 2] = SKY_RADIUS * Math.sin(phi) * Math.sin(theta);
@@ -175,7 +156,6 @@ export class SkySystem {
     this.stars = new THREE.Points(starGeo, this.starMat);
     this.stars.renderOrder = -2.9;
 
-    // Dedicated tiny scene for rebuilding the reflection env-map from the sky.
     this._pmrem = new THREE.PMREMGenerator(renderer);
     this._envScene = new THREE.Scene();
     this._envSky = new Sky();
@@ -183,9 +163,6 @@ export class SkySystem {
     this._envScene.add(this._envSky);
   }
 
-  // The game renders its own sky/cloud dome (a huge sphere, hardcoded blue/white
-  // gradient, always visible) independent of our atmosphere. We hide it while
-  // active so night can actually go dark, and restore it when deactivated.
   _findNativeSky(scene) {
     if (this._nativeSky !== undefined) return this._nativeSky;
     let found = null;
@@ -207,10 +184,6 @@ export class SkySystem {
     };
   }
 
-  // Fed by runtime.js's shared scene scan (see PolyFX._sharedScan) instead of
-  // doing its own scene.traverse — `capture` should be true exactly once, on
-  // the very first scan of a session, so original light state is recorded
-  // before we start recolouring anything.
   ingestLights(dir, hemi, capture) {
     if (capture || !this._origLights) this._origLights = new Map();
     for (const l of dir) if (!this._origLights.has(l)) this._origLights.set(l, { color: l.color.clone(), intensity: l.intensity });
@@ -220,20 +193,13 @@ export class SkySystem {
 
   setState(active, hour) { this.active = active; if (hour != null) this.hour = hour; }
 
-  // `envOnly`: refresh the reflection/IBL environment map (for material
-  // ambient + reflections) WITHOUT touching the visible sky, clouds, scene
-  // lights, or fog. Used for "Default" time of day on Enhanced+ presets — the
-  // whole point of that tier is to light the track properly, not to force a
-  // different-looking sky on top of a game whose stock sky already looks
-  // good; the full atmosphere (day/night dome, procedural clouds, relighting)
-  // only engages once the player explicitly picks a time of day.
   update(scene, camera, envOnly = false) {
     if (!this.active) { this._deactivate(scene); this._fullEngaged = false; return; }
     this.attach(scene);
 
     this.sunDir.copy(sunDirForHour(this.hour));
     const s = sampleSky(this.sunDir.y);
-    this._updateEnv(s); // cheap (internally rate-limited) — keep the IBL fresh either way
+    this._updateEnv(s);
 
     if (envOnly) {
       if (this._fullEngaged) { this._retractVisuals(scene); this._fullEngaged = false; }
@@ -245,9 +211,8 @@ export class SkySystem {
     if (nativeSky && nativeSky.visible) nativeSky.visible = false;
 
     const now = performance.now();
-    const nightF = THREE.MathUtils.clamp(-this.sunDir.y * 3.0, 0, 1); // 0 day .. 1 well below horizon
+    const nightF = THREE.MathUtils.clamp(-this.sunDir.y * 3.0, 0, 1);
 
-    // Sky dome.
     if (this.sky.parent !== scene) scene.add(this.sky);
     this.sky.position.copy(camera.position);
     const u = this.sky.material.uniforms;
@@ -255,7 +220,6 @@ export class SkySystem {
     u.turbidity.value = s.sky.turbidity; u.rayleigh.value = s.sky.rayleigh;
     u.mieCoefficient.value = s.sky.mie; u.mieDirectionalG.value = s.sky.mieG;
 
-    // Clouds.
     if (this.clouds.parent !== scene) scene.add(this.clouds);
     this.clouds.position.copy(camera.position);
     const cu = this.cloudMat.uniforms;
@@ -264,7 +228,6 @@ export class SkySystem {
     cu.uColorDark.value.copy(s.cloud).multiplyScalar(0.62);
     cu.uOpacity.value = 0.16 + 0.30 * THREE.MathUtils.clamp(this.sunDir.y + 0.3, 0, 1);
 
-    // Moon + stars, fading in as the sun sets.
     this.moonDir.set(-this.sunDir.x, 0.55, -this.sunDir.z).normalize();
     if (this.moon.parent !== scene) scene.add(this.moon);
     this.moon.position.copy(camera.position).addScaledVector(this.moonDir, this._moonDist);
@@ -277,12 +240,9 @@ export class SkySystem {
     this.moonLight.target.position.copy(camera.position);
     this.moonLight.intensity = nightF * 0.35;
 
-    // Approximate brightness/colour for materials that ignore real lights
-    // entirely (e.g. the game's particle smoke, which is unlit MeshBasicMaterial).
     const brightness = THREE.MathUtils.clamp(s.sunI / 4.7, 0.16, 1.0);
     this.ambientTint.copy(s.sun).lerp(s.hemiSky, 0.5).multiplyScalar(brightness);
 
-    // Relight.
     for (const l of this._lights.dir) {
       l.color.copy(s.sun);
       const base = this._origLights.get(l);
@@ -294,11 +254,6 @@ export class SkySystem {
       l.intensity = (base ? base.intensity : 1.0) * s.hemiI;
     }
 
-    // Fog: match horizon colour. Only ever push the near plane FARTHER out
-    // (a floor, not a clamp) so an already-loose fog setting is never made
-    // heavier — this used to unconditionally overwrite `near`, which hazed
-    // the horizon once the sky system is active more of the time (see the
-    // "Default" time-of-day handling in runtime.js).
     if (scene.fog) {
       scene.fog.color.copy(s.fog);
       if ('near' in scene.fog) {
@@ -309,10 +264,6 @@ export class SkySystem {
 
   }
 
-  // Rebuild the reflection env-map from the sky when the time changes enough.
-  // Sources sun direction + sky params directly (not from the visible dome's
-  // material uniforms) so this works whether or not the visible dome is
-  // actually being updated this frame (see envOnly above).
   _updateEnv(s) {
     const now = performance.now();
     if (this._envRT && Math.abs(this.hour - this._envHour) < 0.25) return;
@@ -330,10 +281,6 @@ export class SkySystem {
     } catch (e) { console.warn('[PolyFX] env rebuild failed:', e); }
   }
 
-  // Undoes everything the full-atmosphere path (dome, clouds, moon, stars,
-  // relighting, fog) changed, WITHOUT touching envTexture — shared by
-  // _deactivate (sky system off entirely) and the envOnly transition (sky
-  // system still on, just dropping back to IBL-only).
   _retractVisuals(scene) {
     if (this.sky.parent) this.sky.parent.remove(this.sky);
     if (this.clouds.parent) this.clouds.parent.remove(this.clouds);

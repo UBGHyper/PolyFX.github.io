@@ -2,17 +2,7 @@ import {
 	Color
 } from '../../three.module.js';
 
-/**
- * @module LuminosityHighPassShader
- * @three_import import { LuminosityHighPassShader } from 'three/addons/shaders/LuminosityHighPassShader.js';
- */
 
-/**
- * Luminosity high pass shader.
- *
- * @constant
- * @type {ShaderMaterial~Shader}
- */
 const LuminosityHighPassShader = {
 
 	name: 'LuminosityHighPassShader',
@@ -27,7 +17,7 @@ const LuminosityHighPassShader = {
 
 	},
 
-	vertexShader: /* glsl */`
+	vertexShader:`
 
 		varying vec2 vUv;
 
@@ -39,7 +29,7 @@ const LuminosityHighPassShader = {
 
 		}`,
 
-	fragmentShader: /* glsl */`
+	fragmentShader:`
 
 		uniform sampler2D tDiffuse;
 		uniform vec3 defaultColor;

@@ -23,22 +23,14 @@ const TOD_HOURS = [null, 6.5, 9, 12, 15, 16.8, 18, 22];
 
 const WEATHER_ENABLED = false;
 
-// Tone mapping operators exposed as a panel-tunable cycle. Neutral (Khronos
-// PBR Neutral) is the default — unlike ACES it preserves saturation instead
-// of desaturating/lifting content authored with no tone mapping in mind,
-// which was making every Enhanced+ preset look milky next to stock.
 const TONE_MODES = [
   { name: 'None', value: THREE.NoToneMapping },
   { name: 'Neutral', value: THREE.NeutralToneMapping },
   { name: 'ACES', value: THREE.ACESFilmicToneMapping },
   { name: 'AgX', value: THREE.AgXToneMapping },
 ];
-const DEFAULT_TONE_INDEX = 1; // Neutral
+const DEFAULT_TONE_INDEX = 1;
 
-// Detect a software rasterizer (SwiftShader/llvmpipe/"Basic Render Driver")
-// so the composer can be forced off unconditionally — it would render at a
-// handful of fps there regardless of preset. Also records a few coarse
-// capability numbers for picking a sane starting preset.
 function detectCapabilities(renderer) {
   let rendererString = '';
   let maxTextureSize = 0;
@@ -62,11 +54,6 @@ function detectCapabilities(renderer) {
   };
 }
 
-// Adaptive perf guard: under a sustained frame-time budget, degrade one step
-// at a time (AO -> half-res, then SSR off, then god rays off, then bloom off,
-// then bypass the composer entirely); recover the same way in reverse once
-// there's headroom again. A 2.5s cooldown between changes (on top of the gap
-// between the "bad" and "good" thresholds) keeps it from thrashing.
 class PerfGuard {
   static STEPS = ['full', 'aoHalf', 'ssrOff', 'godraysOff', 'bloomOff', 'bypass'];
   static BYPASS_LEVEL = PerfGuard.STEPS.length - 1;
@@ -80,8 +67,8 @@ class PerfGuard {
   update(frameMs, now) {
     if (!this.enabled) return false;
     if (now - this._lastChangeT < 2500) return false;
-    const bad = frameMs > 34;  // sustained < ~29fps
-    const good = frameMs < 16; // sustained > ~62fps — real headroom to recover
+    const bad = frameMs > 34;
+    const good = frameMs < 16;
     if (bad && this.level < PerfGuard.BYPASS_LEVEL) { this.level++; this._lastChangeT = now; return true; }
     if (good && this.level > 0) { this.level--; this._lastChangeT = now; return true; }
     return false;
@@ -93,9 +80,6 @@ class PerfGuard {
 function cfgFor(preset) {
   switch (preset) {
     case PRESET.VERY_LOW:
-      // Cheapest active tier: tone mapping + a very light grade only. No AO,
-      // no bloom, no env/IBL, no HDR-specific passes — for integrated GPUs
-      // that shouldn't be stuck on "Off" just because Balanced is too heavy.
       return { composer: true, tone: TONE_MODES[DEFAULT_TONE_INDEX].value, exposure: 1, env: false,
         ao: null, bloom: null, smaa: false, ssr: null, godrays: null,
         grade: { contrast: 1.02, saturation: 1.02, vignette: 0.03, split: 0 } };
@@ -156,14 +140,6 @@ class FullscreenShaderPass extends Pass {
   }
 }
 
-// Grade pass runs BEFORE tone mapping/output now (see the composer pass order
-// in _ensure), on unbounded scene-linear HDR — not the display-referred [0,1]
-// data it used to see after sRGB conversion. That means "contrast" can't be a
-// pivot-at-0.5 operation (0.5 isn't mid-grey in linear HDR, and highlights
-// routinely exceed 1.0); instead it's a power curve around a linear "middle
-// grey" pivot, which is well-defined for any non-negative input. Saturation
-// (a luminance-relative mix) and a luminance-based cool-shadow/warm-highlight
-// split-tone both work the same way in either space.
 const GradeShader = {
   uniforms: {
     tDiffuse: { value: null },
@@ -429,14 +405,11 @@ class PolyFX {
     this.weatherEngine = new WeatherEngine();
     this.weather = this.weatherEngine.state;
 
-    // Capability/perf.
     this.caps = null;
     this.perfGuard = new PerfGuard();
     this._lastAppliedGuardLevel = -1;
     this._ssrFailed = false;
 
-    // Test-bench overrides (see tools/shotbench) — let a harness without
-    // PolyModLoader present drive the preset/time-of-day/underglow directly.
     this.presetOverride = null;
     this.todOverride = null;
     this.underglowOverride = null;
@@ -446,7 +419,6 @@ class PolyFX {
     this.otherHeadlightsOverride = null;
     this.lastOtherHeadlightsSetting = null;
 
-    // Shared scene scan (cars, lights, smoke material) — see _sharedScan.
     this._scanT = 0;
     this._scanIsFirst = true;
 
@@ -460,8 +432,6 @@ class PolyFX {
   }
 
   render(renderer, scene, camera, settings, sunDir) {
-    // Always tracked, even when the composer is bypassed — otherwise the perf
-    // guard could never observe recovered frame time and un-bypass itself.
     this._trackFrameTime();
 
     if (this.caps === null) {
@@ -523,16 +493,6 @@ class PolyFX {
       }
       if (tod !== this.lastTod) { this.lastTod = tod; this.hourOverride = null; }
       const hour = this.hourOverride != null ? this.hourOverride : TOD_HOURS[tod];
-      // Presets that use `env` (Enhanced+) always keep the reflection/IBL map
-      // fresh — even on "Default" time of day — so they're never lit by a
-      // stale/absent environment map. But on Default, that's IBL-only
-      // (envOnly): the visible sky/clouds/relighting/fog are left alone,
-      // because the game's own stock sky already looks good and swapping in
-      // the procedural atmosphere unconditionally was making Enhanced+ look
-      // hazier than stock, not punchier. The full day/night atmosphere only
-      // engages once the player explicitly picks a time of day. Balanced/Very
-      // Low/Off don't use `env` at all, so they stay exactly stock unless
-      // weather or an explicit hour is set.
       this.skyActive = !!(this.cfg && this.cfg.env) || hour != null || this.weather.cloudCover > 0.5 || this.weather.fogDensity > 0.01 || this.weather.rainRate > 0.01;
       this.skyHour = hour != null ? hour : 12;
       this.envOnly = hour == null;
@@ -616,10 +576,6 @@ class PolyFX {
     this.n8ao.autoDetectTransparency = false;
     this.n8ao.configuration.transparencyAware = false;
     this.bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.1, 0.5, 1.25);
-    // SSR is NOT built here — it's the priciest pass to allocate (several
-    // full-res render targets) and only Photoreal (or wet-weather, when
-    // weather is enabled) ever needs it. See _ensureSSR, called lazily from
-    // _apply only when a preset actually wants it.
     this.ssr = null;
     this.godrays = new FullscreenShaderPass(GodRaysShader);
     this.godrays.enabled = false;
@@ -634,11 +590,6 @@ class PolyFX {
     this.composer.addPass(this.bloom);
     this.composer.addPass(this.godrays);
     this.composer.addPass(this.rainLens);
-    // Grade (contrast/saturation/split-tone/vignette) runs on linear HDR,
-    // BEFORE tone mapping — output (tone map + sRGB) comes next, and SMAA
-    // last of all: SMAA's edge-detection luma thresholds are tuned for
-    // gamma-space input, so running it on linear HDR (the old order) made it
-    // over-detect in highlights and miss in shadows.
     this.composer.addPass(this.grade);
     this.composer.addPass(this.output);
     this.composer.addPass(this.smaa);
@@ -652,8 +603,6 @@ class PolyFX {
     if (!this.panel && typeof document !== 'undefined') { try { this.panel = new PolyFXPanel(this); } catch (e) { console.warn('[PolyFX] panel unavailable:', e); } }
   }
 
-  // Lazily builds SSR the first time a preset actually wants it, inserted
-  // right after the render pass (its normal position in the chain).
   _ensureSSR(renderer, scene, camera) {
     if (this.ssr || this._ssrFailed) return;
     try {
@@ -677,15 +626,15 @@ class PolyFX {
     this.n8ao.enabled = !!cfg.ao;
     if (cfg.ao) {
       Object.assign(this.n8ao.configuration, cfg.ao);
-      if (guardLevel >= 1) this.n8ao.configuration.halfRes = true; // perf guard: AO -> half-res
+      if (guardLevel >= 1) this.n8ao.configuration.halfRes = true;
       if (this.n8ao.configuration.color && this.n8ao.configuration.color.set) this.n8ao.configuration.color.set(0x000000);
     }
 
     this.baseBloomStrength = cfg.bloom ? cfg.bloom.strength : 0;
-    this.bloom.enabled = !!cfg.bloom && guardLevel < 4; // perf guard: bloom off
+    this.bloom.enabled = !!cfg.bloom && guardLevel < 4;
     if (cfg.bloom) Object.assign(this.bloom, cfg.bloom);
 
-    const wantSSR = !!cfg.ssr && guardLevel < 2; // perf guard: SSR off
+    const wantSSR = !!cfg.ssr && guardLevel < 2;
     if (wantSSR) this._ensureSSR(renderer, scene, camera);
     const useSSR = wantSSR && !!this.ssr;
     this.renderPass.enabled = !useSSR;
@@ -699,7 +648,7 @@ class PolyFX {
       }
     }
 
-    this.godrays.enabled = !!cfg.godrays && guardLevel < 3; // perf guard: god rays off
+    this.godrays.enabled = !!cfg.godrays && guardLevel < 3;
     if (cfg.godrays) {
       const u = this.godrays.material.uniforms;
       u.density.value = cfg.godrays.density;
@@ -727,17 +676,12 @@ class PolyFX {
 
     if (cfg.env) {
       if ('environmentIntensity' in scene) scene.environmentIntensity = cfg.envIntensity ?? 0.35;
-      // scene.environment itself is populated every frame by _applyEnv() from
-      // the sky system's PMREM, once it lands (see render()).
     } else {
       scene.environment = this.orig.environment;
       if ('environmentIntensity' in scene) scene.environmentIntensity = this.orig.environmentIntensity;
     }
   }
 
-  // One scene.traverse instead of three (car discovery, light discovery, the
-  // smoke-material scan each used to run on their own independent timers).
-  // Rate-limited to ~1Hz, forced once immediately on the very first call.
   _sharedScan(scene, force) {
     const now = performance.now();
     if (!force && now - this._scanT < 1000) return;
@@ -782,10 +726,6 @@ class PolyFX {
 
   _applySmokeTint(scene) {
     if (!this.smokeMat) return;
-    // this.sky.ambientTint is only kept current while the full atmosphere is
-    // engaged (see sky.js update()'s envOnly path) — in envOnly mode it's
-    // stale, so fall back to the smoke's original colour same as when the
-    // sky system is off entirely.
     if (this.skyActive && !this.envOnly && this.sky) this.smokeMat.color.copy(this.sky.ambientTint);
     else this.smokeMat.color.copy(this.smokeMat.userData.__polyfxOrigColor);
   }
@@ -808,8 +748,6 @@ class PolyFX {
 
   _updateSun(camera, sunDir) {
     const u = this.godrays.material.uniforms;
-    // In envOnly mode the sky's own sunDir isn't being driven from the real
-    // scene, so god rays should track the game's actual sun instead.
     const dir = this.skyActive && !this.envOnly && this.sky ? this.sky.getSunDir() : sunDir;
     if (!dir) { u.intensity.value = 0; return; }
     this.sunOverrideScratch.copy(dir).normalize().multiplyScalar(5000).add(camera.position).project(camera);
@@ -840,7 +778,6 @@ class PolyFX {
     return this.frameMs > 0 ? Math.round(1000 / this.frameMs) : 0;
   }
 
-  // --- test-bench hooks (tools/shotbench) ---------------------------------
   setPresetOverride(n) { this.presetOverride = n == null ? null : Number(n); }
   setTimeOfDayOverride(n) { this.todOverride = n == null ? null : Number(n); }
   setUnderglowOverride(n) { this.underglowOverride = n == null ? null : Number(n); }
@@ -1019,8 +956,6 @@ class PolyFX {
   }
 
   overrideSun(vec) {
-    // envOnly mode deliberately leaves the game's real sun alone (see sky.js
-    // update()) — only override it once the full atmosphere is engaged.
     if (!this.sky || !this.skyActive || this.envOnly) return;
     const len = vec.length() || 20;
     vec.copy(this.sky.getSunDir()).multiplyScalar(len);

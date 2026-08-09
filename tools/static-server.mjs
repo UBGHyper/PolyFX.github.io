@@ -1,6 +1,3 @@
-// Tiny static file server, no dependencies. Used by `npm run dev` (serves
-// app_src/ for manual testing of the direct-bundle-patch flavor) and by
-// tools/shotbench (serves app_src/ for the automated screenshot bench).
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -24,13 +21,7 @@ const MIME = {
   '.track': 'application/octet-stream',
 };
 
-// Serves `rootDir`, falling back to `overlayDir` first for any request path
-// that exists there (used to serve a freshly built dist/ mod on top of the
-// otherwise-unpacked app_src/ tree without copying files around).
 export function createStaticServer(rootDir, { overlayDir, overlayPrefix } = {}) {
-  // path.join always returns OS-native separators; resolve the roots the
-  // same way so a caller passing forward slashes on Windows doesn't fail
-  // startsWith() against a backslash-joined filePath for every request.
   const resolvedRoot = path.resolve(rootDir);
   const resolvedOverlay = overlayDir ? path.resolve(overlayDir) : null;
 

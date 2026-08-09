@@ -1,17 +1,3 @@
-// esbuild's minifier only understands JS — it can't see inside template
-// literal strings, so GLSL shader source (which we author as backtick
-// strings) keeps every comment verbatim through minification. GLSL has no
-// string literal type at all, so `//` and `/*` are unambiguous wherever they
-// appear in a shader string — safe to strip with a plain character scan.
-//
-// Finding the template literals themselves needs a real parser, not a regex:
-// a naive `` /`...`/g `` scan corrupted three.core.js's JSDoc comments, which
-// use markdown-style single backticks (`` `ShaderMaterial` ``) — an odd
-// backtick count inside a comment pairs up across completely unrelated code,
-// and the "template literal" that scan finds isn't one.
-//
-// Only applied to the minified release build (see tools/build.mjs) — the
-// dev build keeps shader comments for debuggability.
 import fs from 'node:fs';
 import * as acorn from 'acorn';
 import * as walk from 'acorn-walk';
@@ -23,15 +9,13 @@ export function stripGlslCommentsInSource(source) {
   try {
     ast = acorn.parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
   } catch {
-    // Not parseable standalone (e.g. esbuild-specific syntax in some vendor
-    // file) — leave it untouched rather than risk corrupting it blind.
     return source;
   }
 
-  const edits = []; // { start, end, replacement }, collected then applied outside-in
+  const edits = [];
   walk.simple(ast, {
     TemplateLiteral(node) {
-      const raw = source.slice(node.start, node.end); // includes the backticks
+      const raw = source.slice(node.start, node.end);
       const inner = raw.slice(1, -1);
       if (!GLSL_MARKERS.test(inner)) return;
       edits.push({ start: node.start, end: node.end, replacement: '`' + stripGlslComments(inner) + '`' });
@@ -50,8 +34,6 @@ export function stripGlslCommentsInSource(source) {
   return out;
 }
 
-// Line-preserving: GLSL's `#` preprocessor directives are newline-sensitive,
-// so a stripped comment collapses to nothing but never eats a newline.
 function stripGlslComments(glsl) {
   let out = '';
   let i = 0;
@@ -67,7 +49,7 @@ function stripGlslComments(glsl) {
         if (glsl[i] === '\n') out += '\n';
         i++;
       }
-      i += 2; // skip closing */
+      i += 2;
       continue;
     }
     out += glsl[i];
