@@ -49,6 +49,74 @@ export function findUpdateMethodSource(bundleText) {
   return bundleText.slice(target.start, target.end);
 }
 
+// Finds how to actually REACH the renderer class from PolyModLoader's own
+// eval() scope. A bare "V" identifier doesn't work — see src/main.mod.js's
+// header comment — because V is declared inside its own isolated webpack
+// module closure, not the module PML's getFromPolyTrack eval() runs in. The
+// one thing confirmed reachable from that scope is the shared webpack
+// require function itself (bound to "i" there), which can reach ANY already
+// — or not-yet — instantiated module by numeric id: `i(<id>)`. So this finds
+// (a) which module id declares the class containing update()'s render call,
+// and (b) which of that module's exports (defined via `<require>.d(exports,
+// {Name: () => Alias})`) actually resolves to that same class, by matching
+// a plain `Alias=ClassName` assignment in the module's own source — that's
+// how esbuild aliases a class to its public export name in this bundle.
+export function findRendererAccessPath(bundleText) {
+  const ast = acorn.parse(bundleText, { ecmaVersion: 'latest', sourceType: 'script' });
+  let result = null;
+
+  walk.ancestor(ast, {
+    MethodDefinition(node, state, ancestors) {
+      if (result || node.key?.name !== 'update' || node.value?.type !== 'FunctionExpression') return;
+      const body = bundleText.slice(node.value.start, node.value.end);
+      if (!body.includes(MIXIN_TOKENS.renderTokenStart)) return;
+
+      let className = null;
+      for (let i = ancestors.length - 1; i >= 0; i--) {
+        if (ancestors[i].type === 'ClassDeclaration') { className = ancestors[i].id?.name ?? null; break; }
+      }
+      if (!className) throw new Error('renderer class is not a named ClassDeclaration — bundle format has changed');
+
+      // The webpack module factory: a 3-param function that is the .value of
+      // an ObjectExpression Property (the module map entry `{ <id>: (e,t,n)
+      // => {...} }`), found by walking outward from the method itself.
+      let moduleId = null;
+      let factoryNode = null;
+      for (let i = ancestors.length - 1; i >= 1; i--) {
+        const candidate = ancestors[i];
+        if ((candidate.type === 'FunctionExpression' || candidate.type === 'ArrowFunctionExpression') && candidate.params.length === 3) {
+          const parent = ancestors[i - 1];
+          if (parent.type === 'Property' && parent.value === candidate && !parent.computed) {
+            moduleId = parent.key.type === 'Literal' ? parent.key.value : parent.key.name;
+            factoryNode = candidate;
+            break;
+          }
+        }
+      }
+      if (moduleId == null || !factoryNode) throw new Error('could not locate the enclosing webpack module factory for the renderer class');
+
+      const requireParam = factoryNode.params[2]?.name;
+      const factorySrc = bundleText.slice(factoryNode.start, factoryNode.end);
+      const dCallMatch = factorySrc.match(new RegExp(`${requireParam}\\.d\\([^,]+,\\s*\\{([^}]*)\\}\\)`));
+      if (!dCallMatch) throw new Error('could not find the module-exports-definer call in the renderer\'s module factory');
+
+      let exportName = null;
+      for (const pair of dCallMatch[1].split(',').map((p) => p.trim()).filter(Boolean)) {
+        const pairMatch = pair.match(/^(\w+):\s*\(\)\s*=>\s*(\w+)$/);
+        if (!pairMatch) continue;
+        const [, name, alias] = pairMatch;
+        if (new RegExp(`(?<![\\w$])${alias}=${className}(?![\\w$])`).test(factorySrc)) { exportName = name; break; }
+      }
+      if (!exportName) throw new Error(`could not determine which export alias maps to class ${className}`);
+
+      result = { moduleId, exportName, className };
+    },
+  });
+
+  if (!result) throw new Error('update() method containing the render call not found — game bundle format has changed');
+  return result;
+}
+
 const PML_RECONSTRUCT_REGEX = /^\s*(async\s+)?([\w$]+)\s*\(([^)]*)\)\s*{([\s\S]*)}$/;
 
 // Faithfully replays PolyModLoader's registerClassMixin for INSERT and

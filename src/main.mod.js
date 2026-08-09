@@ -41,13 +41,28 @@
 // closing brace, and `func` supplies that brace itself instead of assuming
 // anything follows.
 //
+// Separately: `V` is not reachable as a bare identifier from where PML's
+// getFromPolyTrack eval() actually runs — it's declared inside its own
+// isolated webpack module closure, not PML's insertion module. RENDERER_SCOPE
+// below reaches it instead via the webpack require function itself (`i`,
+// confirmed reachable from that scope) plus the module's numeric id — see
+// mixin_tokens.js's RENDERER_ACCESS comment.
+//
 // Verified against a pristine 0.6.2 bundle extracted straight from app.asar
 // (see tools/game-bundle.mjs / `npm test`) — test/mixin-tokens.test.mjs
 // simulates PML's actual method-scoped extraction, splice, and
 // reconstruction, not just whole-file substring presence.
 
 import { PolyMod, MixinType, SettingType } from './vendor/PolyTypes.js';
-import { MIXIN_TOKENS } from './mixin_tokens.js';
+import { MIXIN_TOKENS, RENDERER_ACCESS } from './mixin_tokens.js';
+
+// See mixin_tokens.js's RENDERER_ACCESS comment for why this indirection is
+// necessary: the renderer class isn't reachable as a bare "V" from
+// PolyModLoader's eval() scope, but the shared webpack require function
+// ("i" there) can reach it by module id. This string is eval()'d by PML's
+// getFromPolyTrack, so it must stay a plain expression, not a template
+// literal substitution left in the source.
+const RENDERER_SCOPE = `i(${RENDERER_ACCESS.moduleId}).${RENDERER_ACCESS.exportName}.prototype`;
 
 import './runtime.js';
 
@@ -87,91 +102,9 @@ class PolyFXShadersMod extends PolyMod {
     pml.registerSetting('Time of Day', 'TimeOfDay', SettingType.CUSTOM, '0', TIME_OF_DAY_OPTIONS);
     pml.registerSetting('Underglow', 'Underglow', SettingType.CUSTOM, '0', UNDERGLOW_OPTIONS);
 
-    // TEMPORARY DIAGNOSTIC — remove once the correct scope path is confirmed.
-    // 'V.prototype' throws inside registerClassMixin ("Cannot read properties
-    // of undefined (reading 'toString')"): pml.getFromPolyTrack('V') resolves
-    // to something real but unrelated (an unrelated WASM-loading stub
-    // function that happens to share the name "V" in a different,
-    // coincidentally eval-reachable scope). Brute-forces every single/double
-    // uppercase-letter name through PML's own real getFromPolyTrack to find
-    // whichever one actually holds the render call. Wrapped so it can never
-    // throw, and logs to console regardless of outcome.
-    // Round 2: brute-forcing every single/double uppercase-letter bare name
-    // came back empty — the render class isn't reachable as a simple
-    // identifier from wherever getFromPolyTrack's eval() runs at all, not
-    // just under a colliding name. This scope DOES have a webpack-style
-    // require function reachable as "i" (confirmed separately: i.n() calls
-    // nearby are the classic webpack ESM-interop helper) — introspect it
-    // directly to find its actual module cache property name (varies by
-    // config/version), then search every cached module's exports for the
-    // render call, plus a bounded fallback search from `window`. Passed as
-    // one big expression string since getFromPolyTrack is exactly `eval`.
-    try {
-      const marker = MIXIN_TOKENS.renderTokenStart;
-      const probe = `(function(){
-        const marker = ${JSON.stringify(marker)};
-        const out = { iProps: null, cacheProp: null, cacheSize: null, matches: [], windowMatches: [] };
-        function isMatch(obj) {
-          const upd = obj && obj.prototype && obj.prototype.update;
-          return typeof upd === 'function' && upd.toString().includes(marker);
-        }
-        try {
-          if (typeof i === 'function') {
-            out.iProps = Object.getOwnPropertyNames(i);
-            for (const propName of out.iProps) {
-              let val;
-              try { val = i[propName]; } catch (e) { continue; }
-              if (!val || typeof val !== 'object') continue;
-              const keys = Object.keys(val);
-              if (keys.length < 5 || keys.length > 5000) continue; // heuristic: a module cache, not something tiny/huge
-              out.cacheProp = propName;
-              out.cacheSize = keys.length;
-              for (const k of keys) {
-                try {
-                  const entry = val[k];
-                  const candidates = [entry, entry && entry.exports, entry && entry.exports && entry.exports.default];
-                  for (const c of candidates) {
-                    if (isMatch(c)) { out.matches.push({ cacheProp: propName, moduleKey: k }); }
-                    if (c && typeof c === 'object') {
-                      for (const ek of Object.keys(c)) {
-                        try { if (isMatch(c[ek])) out.matches.push({ cacheProp: propName, moduleKey: k, exportKey: ek }); } catch (e) {}
-                      }
-                    }
-                  }
-                } catch (e) {}
-              }
-              if (out.matches.length) break;
-            }
-          }
-        } catch (e) { out.iError = String(e); }
-        try {
-          if (!out.matches.length) {
-            const seen = new Set(); let visited = 0;
-            (function search(obj, path, depth) {
-              if (!obj || depth > 3 || visited > 20000 || seen.has(obj)) return;
-              seen.add(obj); visited++;
-              if (isMatch(obj)) { out.windowMatches.push(path); return; }
-              let keys; try { keys = Object.keys(obj); } catch (e) { return; }
-              for (const k of keys) {
-                if (visited > 20000) return;
-                let v; try { v = obj[k]; } catch (e) { continue; }
-                if (v && (typeof v === 'object' || typeof v === 'function')) search(v, path + '.' + k, depth + 1);
-              }
-            })(window, 'window', 0);
-          }
-        } catch (e) { out.windowError = String(e); }
-        return JSON.stringify(out);
-      })()`;
-      const result = pml.getFromPolyTrack(probe);
-      console.log('[PolyFX diag v2]', result);
-    } catch (e) {
-      console.error('[PolyFX diag v2] scan itself failed:', e);
-    }
-    // --- END TEMPORARY DIAGNOSTIC ---
-
     try {
       // (a) sun-direction override hook.
-      pml.registerClassMixin('V.prototype', 'update', {
+      pml.registerClassMixin(RENDERER_SCOPE, 'update', {
         type: MixinType.INSERT,
         token: MIXIN_TOKENS.sunInsert,
         func: `window.__PolyFX?.overrideSun?.((0, i.gn)(this, I, "f"));`,
@@ -181,7 +114,7 @@ class PolyFXShadersMod extends PolyMod {
       // the exact tail of update()'s own render(...) call plus its closing
       // brace — i.e. the very end of the method — not a reference to any
       // other method.
-      pml.registerClassMixin('V.prototype', 'update', {
+      pml.registerClassMixin(RENDERER_SCOPE, 'update', {
         type: MixinType.REPLACEBETWEEN,
         tokenStart: MIXIN_TOKENS.renderTokenStart,
         tokenEnd: MIXIN_TOKENS.renderTokenEnd,
@@ -200,10 +133,11 @@ class PolyFXShadersMod extends PolyMod {
                 }`,
       });
     } catch (e) {
-      // Caught here (not left to PML's own try/catch around init()) so the
-      // diagnostic above still runs and the mod doesn't get unloaded while
-      // we're actively narrowing this down.
-      console.error('[PolyFX] mixin registration failed (see diagnostic above for the likely fix):', e);
+      // Caught here (not left to PML's own try/catch around init()) so a
+      // mixin failure — e.g. from a future game update moving these tokens
+      // or the renderer's module id — logs instead of silently losing the
+      // settings registered above too.
+      console.error('[PolyFX] mixin registration failed — game bundle format likely changed, see src/mixin_tokens.js:', e);
     }
   };
 }

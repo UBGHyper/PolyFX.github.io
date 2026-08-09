@@ -26,7 +26,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
-import { extractAsar, verifyMixinTokens, simulatePmlMixins, root } from '../tools/game-bundle.mjs';
+import { extractAsar, verifyMixinTokens, simulatePmlMixins, findRendererAccessPath, root } from '../tools/game-bundle.mjs';
+import { RENDERER_ACCESS } from '../src/mixin_tokens.js';
 
 const asarPath = path.join(root, 'extracted', 'resources', 'app.asar');
 const tmpDir = path.join(root, 'test', '.tmp-pristine-bundle');
@@ -56,6 +57,28 @@ test('mixin tokens exist, are correctly scoped, and produce valid JS', async (t)
   assert.ok(match, 'final reconstructed function must match PolyModLoader\'s own regex');
   const finalSource = `(function(${match[3].trim()}) {${match[4].trim()}})`;
   assert.doesNotThrow(() => new vm.Script(finalSource), 'the function PolyModLoader would install in place of update() must be syntactically valid JS');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('RENDERER_ACCESS (webpack module id + export alias) matches the pristine bundle', async (t) => {
+  if (!fs.existsSync(asarPath)) {
+    t.skip(`no local app.asar at ${asarPath} — see README's local dev setup to run this test`);
+    return;
+  }
+
+  await extractAsar(asarPath, tmpDir);
+  const bundleText = fs.readFileSync(path.join(tmpDir, 'main.bundle.js'), 'utf8');
+
+  // main.mod.js can't reach the renderer class via a bare "V" identifier —
+  // it's declared in its own isolated webpack module closure (see
+  // mixin_tokens.js). It reaches it instead via `i(<moduleId>).<exportName>`,
+  // using the shared webpack require function confirmed reachable from
+  // PolyModLoader's own eval() scope. If a game update reshuffles module ids
+  // or export names, this must fail loudly instead of silently mis-resolving.
+  const found = findRendererAccessPath(bundleText);
+  assert.equal(found.moduleId, RENDERER_ACCESS.moduleId, 'renderer module id drifted — update RENDERER_ACCESS in src/mixin_tokens.js');
+  assert.equal(found.exportName, RENDERER_ACCESS.exportName, 'renderer export alias drifted — update RENDERER_ACCESS in src/mixin_tokens.js');
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
