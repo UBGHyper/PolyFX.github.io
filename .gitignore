@@ -1,0 +1,10 @@
+node_modules/
+dist/
+tools/shotbench/out/
+test/.tmp-pristine-bundle/
+*.log
+
+# Kodub's PolyTrack — proprietary, not ours to redistribute. Populate locally
+# with `npm run setup:dev -- --asar <path-to-app.asar>` (see README).
+app_src/
+extracted/
