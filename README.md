@@ -17,8 +17,9 @@ https://cdn.polymodloader.com/gh/UBGHyper/PolyFX.github.io/main/release
 ```
 
 Settings show up under **Realistic Shading**: Graphics Preset (default Balanced), Time of Day,
-Underglow, and Headlights. In-game, press **`** (backtick) for a live tuning panel with every
-parameter as a slider.
+Underglow, Headlights, and Other Cars' Headlights (other cars' headlights are also capped to the
+closest few regardless of this setting — see car_lights.js's `update()` for why). In-game, press
+**`** (backtick) for a live tuning panel with every parameter as a slider.
 **F2** is a free-fly photo mode, **F9** saves a screenshot.
 
 ## Local dev setup

@@ -15,6 +15,8 @@
 import * as THREE from './vendor/three.module.js';
 import { fitCarAnchor } from './car_anchor.js';
 
+const _worldPos = new THREE.Vector3();
+
 export class CarLights {
   constructor() {
     this.cars = new Map(); // carRoot -> { carrier, brakeMesh, brakeMat, brakeSpot, brakeTarget, headL, headR, anchor, origEmissive }
@@ -35,13 +37,47 @@ export class CarLights {
       // typical car length. 2.0 keeps the pool close to the bumper; tune live
       // via the panel's "Rear range" slider if it still needs adjusting.
       tailGlow: 0.28, brakeBoost: 3.2, brakeLightIntensity: 65, tailLightIntensity: 8, brakeLightDistance: 2.0,
+      // Other cars' (opponents', ghosts', leaderboard replays') headlights —
+      // separate from the player's own, which is always exempt. Also capped
+      // at maxLitOtherCars regardless of this flag: THREE.js still walks
+      // every VISIBLE light in the scene every frame building its lighting
+      // uniforms, and can recompile shaders when the active light count
+      // changes — with no cap, a race with many other cars means dozens of
+      // real-time SpotLights, which tanks perf and can visibly glitch
+      // (shader recompiles showing up as a frame or two of black/garbage).
+      otherHeadlightsEnabled: true, maxLitOtherCars: 6,
     };
   }
 
-  update(scene, headlightsOn) {
+  update(scene, headlightsOn, camera) {
     for (const [root, car] of this.cars) {
       if (root.parent !== scene) { this.cars.delete(root); continue; }
-      this._applyHeadlights(car, headlightsOn);
+    }
+
+    // The player's own car is whichever tracked car is closest to the
+    // active camera — chase/cockpit cameras always sit right on top of it,
+    // and this needs no game-specific tagging to identify it. Distances are
+    // computed once here and reused below for both that and the
+    // closest-others cap.
+    let ownRoot = null;
+    const entries = [];
+    if (camera) {
+      let bestDistSq = Infinity;
+      for (const [root, car] of this.cars) {
+        const distSq = camera.position.distanceToSquared(car.carrier.getWorldPosition(_worldPos));
+        entries.push({ root, distSq });
+        if (distSq < bestDistSq) { bestDistSq = distSq; ownRoot = root; }
+      }
+    }
+
+    const others = entries.filter((e) => e.root !== ownRoot).sort((a, b) => a.distSq - b.distSq);
+    const litOtherRoots = new Set(
+      this.cfg.otherHeadlightsEnabled ? others.slice(0, this.cfg.maxLitOtherCars).map((e) => e.root) : [],
+    );
+
+    for (const [root, car] of this.cars) {
+      const isOwn = root === ownRoot;
+      this._applyHeadlights(car, headlightsOn && (isOwn || litOtherRoots.has(root)));
       this._applyBrake(car, headlightsOn);
     }
   }
@@ -73,6 +109,7 @@ export class CarLights {
 
     const mkSpot = (color) => {
       const spot = new THREE.SpotLight(color, 0, 1, 0.5, 0.6, 1.2);
+      spot.visible = false; // update() sets this correctly every frame — see its header comment on why .visible matters
       spot.userData.__polyfxOwned = true;
       const target = new THREE.Object3D();
       spot.target = target;
@@ -139,7 +176,15 @@ export class CarLights {
     car.brakeSpot.penumbra = 1.0;
   }
 
-  _setHeadIntensity(car, v) { car.headL.spot.intensity = v; car.headR.spot.intensity = v; }
+  // .visible matters, not just .intensity===0: THREE.js still walks every
+  // VISIBLE light building its per-frame lighting uniforms (and can
+  // recompile shaders when the active light count changes) regardless of
+  // intensity — an "off" light left visible still costs exactly as much as
+  // a lit one. See update()'s header comment.
+  _setHeadIntensity(car, v) {
+    car.headL.spot.intensity = v; car.headL.spot.visible = v > 0;
+    car.headR.spot.intensity = v; car.headR.spot.visible = v > 0;
+  }
 
   _applyHeadlights(car, on) {
     this._setHeadIntensity(car, this.cfg.enabled && on ? this.cfg.intensity : 0);
@@ -162,6 +207,7 @@ export class CarLights {
       car.brakeMat.emissiveIntensity = car.origEmissive;
       car.brakeSpot.intensity = 0;
     }
+    car.brakeSpot.visible = car.brakeSpot.intensity > 0;
   }
 
   applyConfig(partial) {
@@ -175,6 +221,7 @@ export class CarLights {
     for (const [, car] of this.cars) {
       this._setHeadIntensity(car, 0);
       car.brakeSpot.intensity = 0;
+      car.brakeSpot.visible = false;
       if (car.brakeMat) car.brakeMat.emissiveIntensity = car.origEmissive;
     }
   }

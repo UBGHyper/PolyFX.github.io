@@ -17,6 +17,7 @@ const GRAPHICS_PRESET_ID = 'GraphicsPreset';
 const TIME_OF_DAY_ID = 'TimeOfDay';
 const UNDERGLOW_ID = 'Underglow';
 const HEADLIGHTS_ID = 'Headlights';
+const OTHER_HEADLIGHTS_ID = 'OtherHeadlights';
 const PRESET = { OFF: 0, BALANCED: 1, ENHANCED: 2, SEMI_REAL: 3, PHOTO_REAL: 4, VERY_LOW: 5 };
 const TOD_HOURS = [null, 6.5, 9, 12, 15, 16.8, 18, 22];
 
@@ -442,6 +443,8 @@ class PolyFX {
     this.lastUnderglowSetting = null;
     this.carLightsOverride = null;
     this.lastCarLightsSetting = null;
+    this.otherHeadlightsOverride = null;
+    this.lastOtherHeadlightsSetting = null;
 
     // Shared scene scan (cars, lights, smoke material) — see _sharedScan.
     this._scanT = 0;
@@ -565,9 +568,19 @@ class PolyFX {
         if (!this.carLightsEnabled && this.carLights) this.carLights.disableAll();
       }
 
+      let otherHeadlightsSetting = this.otherHeadlightsOverride != null ? this.otherHeadlightsOverride : 1;
+      if (this.otherHeadlightsOverride == null) {
+        try { otherHeadlightsSetting = parseInt(window.polyModLoader?.getSetting(OTHER_HEADLIGHTS_ID), 10); } catch (_) {}
+        if (!Number.isFinite(otherHeadlightsSetting)) otherHeadlightsSetting = 1;
+      }
+      if (otherHeadlightsSetting !== this.lastOtherHeadlightsSetting) {
+        this.lastOtherHeadlightsSetting = otherHeadlightsSetting;
+        if (this.carLights) this.carLights.cfg.otherHeadlightsEnabled = otherHeadlightsSetting >= 1;
+      }
+
       if (this.carLights) {
         const dusk = this.skyActive && !this.envOnly && this.sky && this.sky.sunDir.y < 0.1;
-        if (this.carLightsEnabled) this.carLights.update(scene, this.headlightsForce || this.weatherHeadlights || dusk);
+        if (this.carLightsEnabled) this.carLights.update(scene, this.headlightsForce || this.weatherHeadlights || dusk, activeCamera);
         else this.carLights.disableAll();
       }
 
@@ -850,6 +863,7 @@ class PolyFX {
         this.carLightsEnabled = on;
         if (!on && this.carLights) this.carLights.disableAll();
         break;
+      case 'otherHeadlights': if (this.carLights) this.carLights.cfg.otherHeadlightsEnabled = on; break;
       case 'headlightsForce': this.headlightsForce = on; break;
       case 'photo': if (this.photo) this.photo.setActive(on, this.lastCamera); break;
       case 'lightning': this.weather.lightning = on; break;
@@ -944,6 +958,7 @@ class PolyFX {
         underglowPulse: !!(this.underglow && this.underglow.cfg.pulse),
         perfguard: this.perfGuard.enabled,
         carlights: this.carLightsEnabled,
+        otherHeadlights: !!(this.carLights && this.carLights.cfg.otherHeadlightsEnabled),
         headlightsForce: this.headlightsForce,
         photo: !!(this.photo && this.photo.active),
         lightning: !!this.weather.lightning,
@@ -1026,6 +1041,7 @@ const PANEL_TOGGLES = [
   ['underglow', 'Underglow'],
   ['underglowPulse', 'Underglow Pulse'],
   ['carlights', 'Car Lights'],
+  ['otherHeadlights', "Other Cars' Headlights"],
   ['headlightsForce', 'Force Headlights'],
   ['photo', 'Photo Mode'],
   ...(WEATHER_ENABLED ? [['lightning', 'Lightning']] : []),
