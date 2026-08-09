@@ -49,18 +49,55 @@ export function findUpdateMethodSource(bundleText) {
   return bundleText.slice(target.start, target.end);
 }
 
+// Shared by findRendererAccessPath and findThreeRendererAccessPath: given a
+// ClassDeclaration node's own ancestor chain, finds (a) which webpack module
+// id declares it, and (b) which of that module's exports (defined via
+// `<require>.d(exports, {Name: () => Alias})`) actually resolves to that
+// class, by matching a plain `Alias=ClassName` assignment in the module's
+// own source — that's how esbuild aliases a class to its public export name
+// in this bundle. moduleId/exportName are what a scope string built as
+// `i(<moduleId>).<exportName>` needs — see findRendererAccessPath's header
+// comment for why that indirection is necessary at all.
+function resolveClassModuleExport(bundleText, className, ancestors) {
+  let moduleId = null;
+  let factoryNode = null;
+  for (let i = ancestors.length - 1; i >= 1; i--) {
+    const candidate = ancestors[i];
+    if ((candidate.type === 'FunctionExpression' || candidate.type === 'ArrowFunctionExpression') && candidate.params.length === 3) {
+      const parent = ancestors[i - 1];
+      if (parent.type === 'Property' && parent.value === candidate && !parent.computed) {
+        moduleId = parent.key.type === 'Literal' ? parent.key.value : parent.key.name;
+        factoryNode = candidate;
+        break;
+      }
+    }
+  }
+  if (moduleId == null || !factoryNode) throw new Error(`could not locate the enclosing webpack module factory for class ${className}`);
+
+  const requireParam = factoryNode.params[2]?.name;
+  const factorySrc = bundleText.slice(factoryNode.start, factoryNode.end);
+  const dCallMatch = factorySrc.match(new RegExp(`${requireParam}\\.d\\([^,]+,\\s*\\{([^}]*)\\}\\)`));
+  if (!dCallMatch) throw new Error(`could not find the module-exports-definer call in ${className}'s module factory`);
+
+  let exportName = null;
+  for (const pair of dCallMatch[1].split(',').map((p) => p.trim()).filter(Boolean)) {
+    const pairMatch = pair.match(/^(\w+):\s*\(\)\s*=>\s*(\w+)$/);
+    if (!pairMatch) continue;
+    const [, name, alias] = pairMatch;
+    if (alias === className || new RegExp(`(?<![\\w$])${alias}=${className}(?![\\w$])`).test(factorySrc)) { exportName = name; break; }
+  }
+  if (!exportName) throw new Error(`could not determine which export alias maps to class ${className}`);
+
+  return { moduleId, exportName, className };
+}
+
 // Finds how to actually REACH the renderer class from PolyModLoader's own
 // eval() scope. A bare "V" identifier doesn't work — see src/main.mod.js's
 // header comment — because V is declared inside its own isolated webpack
 // module closure, not the module PML's getFromPolyTrack eval() runs in. The
 // one thing confirmed reachable from that scope is the shared webpack
 // require function itself (bound to "i" there), which can reach ANY already
-// — or not-yet — instantiated module by numeric id: `i(<id>)`. So this finds
-// (a) which module id declares the class containing update()'s render call,
-// and (b) which of that module's exports (defined via `<require>.d(exports,
-// {Name: () => Alias})`) actually resolves to that same class, by matching
-// a plain `Alias=ClassName` assignment in the module's own source — that's
-// how esbuild aliases a class to its public export name in this bundle.
+// — or not-yet — instantiated module by numeric id: `i(<id>)`.
 export function findRendererAccessPath(bundleText) {
   const ast = acorn.parse(bundleText, { ecmaVersion: 'latest', sourceType: 'script' });
   let result = null;
@@ -77,43 +114,37 @@ export function findRendererAccessPath(bundleText) {
       }
       if (!className) throw new Error('renderer class is not a named ClassDeclaration — bundle format has changed');
 
-      // The webpack module factory: a 3-param function that is the .value of
-      // an ObjectExpression Property (the module map entry `{ <id>: (e,t,n)
-      // => {...} }`), found by walking outward from the method itself.
-      let moduleId = null;
-      let factoryNode = null;
-      for (let i = ancestors.length - 1; i >= 1; i--) {
-        const candidate = ancestors[i];
-        if ((candidate.type === 'FunctionExpression' || candidate.type === 'ArrowFunctionExpression') && candidate.params.length === 3) {
-          const parent = ancestors[i - 1];
-          if (parent.type === 'Property' && parent.value === candidate && !parent.computed) {
-            moduleId = parent.key.type === 'Literal' ? parent.key.value : parent.key.name;
-            factoryNode = candidate;
-            break;
-          }
-        }
-      }
-      if (moduleId == null || !factoryNode) throw new Error('could not locate the enclosing webpack module factory for the renderer class');
-
-      const requireParam = factoryNode.params[2]?.name;
-      const factorySrc = bundleText.slice(factoryNode.start, factoryNode.end);
-      const dCallMatch = factorySrc.match(new RegExp(`${requireParam}\\.d\\([^,]+,\\s*\\{([^}]*)\\}\\)`));
-      if (!dCallMatch) throw new Error('could not find the module-exports-definer call in the renderer\'s module factory');
-
-      let exportName = null;
-      for (const pair of dCallMatch[1].split(',').map((p) => p.trim()).filter(Boolean)) {
-        const pairMatch = pair.match(/^(\w+):\s*\(\)\s*=>\s*(\w+)$/);
-        if (!pairMatch) continue;
-        const [, name, alias] = pairMatch;
-        if (new RegExp(`(?<![\\w$])${alias}=${className}(?![\\w$])`).test(factorySrc)) { exportName = name; break; }
-      }
-      if (!exportName) throw new Error(`could not determine which export alias maps to class ${className}`);
-
-      result = { moduleId, exportName, className };
+      result = resolveClassModuleExport(bundleText, className, ancestors);
     },
   });
 
   if (!result) throw new Error('update() method containing the render call not found — game bundle format has changed');
+  return result;
+}
+
+// Same idea as findRendererAccessPath, but for the vendored three.js
+// WebGLRenderer class itself — main.mod.js patches its prototype directly
+// (see that file's header comment for why: PML's registerClassMixin breaks
+// the closure private-field WeakMaps that V.prototype.update needs, so the
+// render/sun hooks bypass registerClassMixin entirely and reach both classes
+// this same way instead). Identified by content (`isWebGLRenderer=!0`, set
+// unconditionally in its constructor across three.js versions), not by
+// minified name.
+export function findThreeRendererAccessPath(bundleText) {
+  const ast = acorn.parse(bundleText, { ecmaVersion: 'latest', sourceType: 'script' });
+  let result = null;
+
+  walk.ancestor(ast, {
+    ClassDeclaration(node, state, ancestors) {
+      if (result || !node.id?.name) return;
+      const classSrc = bundleText.slice(node.start, node.end);
+      if (!classSrc.includes('isWebGLRenderer=!0') && !classSrc.includes('isWebGLRenderer = true')) return;
+
+      result = resolveClassModuleExport(bundleText, node.id.name, ancestors);
+    },
+  });
+
+  if (!result) throw new Error('THREE.WebGLRenderer class not found — vendored three.js version has changed');
   return result;
 }
 

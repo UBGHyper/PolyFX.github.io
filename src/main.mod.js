@@ -5,14 +5,16 @@
 //      PML's own registerSetting API — PML allocates the enum id, default
 //      value, and settings-menu dropdown for these itself, so we never touch
 //      the raw bundle for that part.
-//   2. Two small mixins on the renderer class (`V` in the 0.6.2 bundle), both
-//      inside its `update()` method:
-//        a) INSERT right after the sun-position copy, so PolyFX can override
-//           the sun direction when its own day/night sky is active.
-//        b) REPLACEBETWEEN around the stock `renderer.render(scene, camera)`
-//           call, routing it through `window.__PolyFX.render(...)` when the
-//           mod is present (falls straight back to the original call when it
-//           isn't, or when the "Off" graphics preset is selected).
+//   2. Two hooks into the renderer's per-frame update, installed by directly
+//      patching prototypes (see "Why not registerClassMixin" below) instead
+//      of PML's own mixin API:
+//        a) wrapping the day/night object's getSunPosition() for the
+//           duration of one update() call, so PolyFX can override the sun
+//           direction when its own day/night sky is active.
+//        b) wrapping WebGLRenderer.prototype.render itself, routing it
+//           through window.__PolyFX.render(...) when the mod is present
+//           (falls straight back to the original call when it isn't, or
+//           when the "Off" graphics preset is selected).
 //
 // Everything else (the actual post-processing pipeline, weather, sky, car
 // lights, underglow, tuning panel) lives in runtime.js, imported below.
@@ -22,47 +24,54 @@
 // PolyMod` (it duck-types via `modImport.polyMod`), so a local copy is safe,
 // and it keeps the mod working under PML's offline/cached mode.
 //
-// Tokens below are matched EXACTLY against the live minified game bundle —
-// registerClassMixin calls `.toString()` on the actual running function
-// object, which per spec returns the function's literal source text as it
-// was shipped (no reformatting), so a token with prettifier-added whitespace
-// (e.g. spaces after commas) silently fails to match and throws "Token not
-// found" — the mod would never load under real PolyModLoader even with a
-// correct bundle build.
+// --- Why not registerClassMixin ---
 //
-// registerClassMixin also operates on `V.prototype.update`'s OWN toString()
-// output — i.e. the SOURCE OF JUST THAT ONE METHOD, not the whole bundle
-// file. `addMaterial` used to be tokenEnd here on the assumption it was the
-// tail of update()'s body, but it's actually a separate SIBLING method
-// starting immediately after update()'s own closing brace — a whole-file
-// `indexOf` finds it fine (it's real text, just not inside update()), so
-// that mistake survived undetected until tested against PML's real
-// method-scoped mechanism. tokenEnd now ends exactly at update()'s own
-// closing brace, and `func` supplies that brace itself instead of assuming
-// anything follows.
+// PML's registerClassMixin(scope, path, mixin) works by taking the target
+// method's OWN toString() text, splicing the mixin's code in at a token, and
+// reinstalling the result via (paraphrased) `eval('eval(scope)[path] = ' +
+// '(function(...) {...newBody...})')`. That reinstall is itself a direct
+// eval() call written inside PolyModLoader's own source — and per JS spec, a
+// function expression evaluated via eval() closes over the LEXICAL SCOPE
+// AT THE EVAL SITE, not whatever scope the original source text came from.
 //
-// Separately: `V` is not reachable as a bare identifier from where PML's
-// getFromPolyTrack eval() actually runs — it's declared inside its own
-// isolated webpack module closure, not PML's insertion module. RENDERER_SCOPE
-// below reaches it instead via the webpack require function itself (`i`,
-// confirmed reachable from that scope) plus the module's numeric id — see
-// mixin_tokens.js's RENDERER_ACCESS comment.
+// The renderer class (`V` in the 0.6.2 bundle) is compiled with several
+// private fields (the renderer, scene, camera, sun-direction vector, etc.)
+// implemented as module-scope WeakMaps (`k`, `E`, `M`, `I`, ...) that
+// V.prototype.update reads via a shared per-field-access helper bound to a
+// local `i` — all free variables from V's OWN webpack module closure. Once
+// PML reconstructs update() via the mechanism above, that new function's
+// closure is PML's own module (getFromPolyTrack's home), not V's — so every
+// one of those free variables is simply unreachable there. The mixin
+// *registers* fine (getFromPolyTrack('i(1507).A.prototype')['update'] reads
+// the ORIGINAL, still-closure-intact function just fine), but the
+// RECONSTRUCTED replacement throws the moment it actually runs and tries to
+// use them: "(0, i.gn) is not a function".
 //
-// Verified against a pristine 0.6.2 bundle extracted straight from app.asar
-// (see tools/game-bundle.mjs / `npm test`) — test/mixin-tokens.test.mjs
-// simulates PML's actual method-scoped extraction, splice, and
-// reconstruction, not just whole-file substring presence.
-
-import { PolyMod, MixinType, SettingType } from './vendor/PolyTypes.js';
-import { MIXIN_TOKENS, RENDERER_ACCESS } from './mixin_tokens.js';
-
-// See mixin_tokens.js's RENDERER_ACCESS comment for why this indirection is
-// necessary: the renderer class isn't reachable as a bare "V" from
-// PolyModLoader's eval() scope, but the shared webpack require function
-// ("i" there) can reach it by module id. This string is eval()'d by PML's
-// getFromPolyTrack, so it must stay a plain expression, not a template
-// literal substitution left in the source.
-const RENDERER_SCOPE = `i(${RENDERER_ACCESS.moduleId}).${RENDERER_ACCESS.exportName}.prototype`;
+// This is unrelated to (and layered on top of) a separate, now-solved
+// problem: V isn't reachable as a bare "V" identifier from PML's own
+// getFromPolyTrack eval() scope at all, because it's declared in its own
+// isolated webpack module. See RENDERER_ACCESS / THREE_RENDERER_ACCESS in
+// mixin_tokens.js for how both classes are actually reached — via the
+// shared webpack require function ("i" in that scope) plus each class's
+// module id, e.g. `i(1507).A`.
+//
+// The fix here sidesteps registerClassMixin's reconstruction entirely: it
+// fetches the live class objects via getFromPolyTrack (a plain property
+// read — no eval'd function is created, so nothing loses its closure), then
+// reassigns their prototype methods directly from THIS module's own,
+// perfectly normal closure. update() itself is never touched; only
+// WebGLRenderer.prototype.render (a standalone, non-private-field three.js
+// library method — safe to wrap) and a temporary per-call wrapper around
+// the day/night object's own getSunPosition() method (also not private).
+//
+// The dev flavor (tools/game-bundle.mjs's patchBundle, used by
+// app_src/main.bundle.js for `npm run dev` / `npm run shots`) doesn't have
+// any of this trouble — it edits the bundle's source TEXT once, before the
+// file is ever loaded, so the patched code becomes a normal part of V's own
+// module and keeps its closure naturally. It still uses the token-splice
+// approach in src/mixin_tokens.js's MIXIN_TOKENS.
+import { PolyMod, SettingType } from './vendor/PolyTypes.js';
+import { RENDERER_ACCESS, THREE_RENDERER_ACCESS } from './mixin_tokens.js';
 
 import './runtime.js';
 
@@ -103,41 +112,60 @@ class PolyFXShadersMod extends PolyMod {
     pml.registerSetting('Underglow', 'Underglow', SettingType.CUSTOM, '0', UNDERGLOW_OPTIONS);
 
     try {
-      // (a) sun-direction override hook.
-      pml.registerClassMixin(RENDERER_SCOPE, 'update', {
-        type: MixinType.INSERT,
-        token: MIXIN_TOKENS.sunInsert,
-        func: `window.__PolyFX?.overrideSun?.((0, i.gn)(this, I, "f"));`,
-      });
+      const V = pml.getFromPolyTrack(`i(${RENDERER_ACCESS.moduleId}).${RENDERER_ACCESS.exportName}`);
+      const WebGLRendererClass = pml.getFromPolyTrack(`i(${THREE_RENDERER_ACCESS.moduleId}).${THREE_RENDERER_ACCESS.exportName}`);
 
-      // (b) route the render call through PolyFX when present. tokenEnd is
-      // the exact tail of update()'s own render(...) call plus its closing
-      // brace — i.e. the very end of the method — not a reference to any
-      // other method.
-      pml.registerClassMixin(RENDERER_SCOPE, 'update', {
-        type: MixinType.REPLACEBETWEEN,
-        tokenStart: MIXIN_TOKENS.renderTokenStart,
-        tokenEnd: MIXIN_TOKENS.renderTokenEnd,
-        func: `window.__PolyFX
-                  ? window.__PolyFX.render(
-                      (0, i.gn)(this, k, "f"),
-                      (0, i.gn)(this, E, "f"),
-                      (0, i.gn)(this, M, "f"),
-                      (0, i.gn)(this, x, "f"),
-                      (0, i.gn)(this, I, "f"),
-                    )
-                  : (0, i.gn)(this, k, "f").render(
-                      (0, i.gn)(this, E, "f"),
-                      (0, i.gn)(this, M, "f"),
-                    );
-                }`,
-      });
+      const originalUpdate = V.prototype.update;
+      const originalRender = WebGLRendererClass.prototype.render;
+
+      // Set by the update() wrapper below (getSunPosition() is always called
+      // near the start of the original update(), and render() always at the
+      // end of that same synchronous call) so the render() wrapper has a sun
+      // direction to hand PolyFX for god rays, without needing V's own
+      // private sun-vector field.
+      let lastSunDir = null;
+
+      // (a) sun-direction override hook. Temporarily wraps the day/night
+      // object's own getSunPosition for the duration of the original
+      // update() call, so PolyFX can mutate the vector it returns exactly
+      // like the old INSERT mixin did — but via a real, closure-intact
+      // method instead of a reconstructed one.
+      V.prototype.update = function (e) {
+        const hadOwnGetSunPosition = Object.prototype.hasOwnProperty.call(e, 'getSunPosition');
+        const originalGetSunPosition = e.getSunPosition;
+        e.getSunPosition = function (...args) {
+          const pos = originalGetSunPosition.apply(this, args);
+          window.__PolyFX?.overrideSun?.(pos);
+          lastSunDir = pos;
+          return pos;
+        };
+        try {
+          return originalUpdate.call(this, e);
+        } finally {
+          if (hadOwnGetSunPosition) e.getSunPosition = originalGetSunPosition;
+          else delete e.getSunPosition;
+        }
+      };
+
+      // (b) route the render call through PolyFX when present. Passing
+      // originalRender through as stockRender (rather than letting
+      // runtime.js call renderer.render(...) itself) is required, not just
+      // tidy: renderer.render IS this very wrapper once installed, so any
+      // stock-passthrough path inside window.__PolyFX.render that called it
+      // directly would recurse into itself.
+      WebGLRendererClass.prototype.render = function (scene, camera) {
+        if (window.__PolyFX) {
+          window.__PolyFX.render(this, scene, camera, undefined, lastSunDir, originalRender);
+          return;
+        }
+        return originalRender.call(this, scene, camera);
+      };
     } catch (e) {
       // Caught here (not left to PML's own try/catch around init()) so a
-      // mixin failure — e.g. from a future game update moving these tokens
-      // or the renderer's module id — logs instead of silently losing the
-      // settings registered above too.
-      console.error('[PolyFX] mixin registration failed — game bundle format likely changed, see src/mixin_tokens.js:', e);
+      // hook-installation failure — e.g. from a future game update moving
+      // the renderer's module id or export name — logs instead of silently
+      // losing the settings registered above too.
+      console.error('[PolyFX] renderer hook installation failed — game bundle format likely changed, see src/mixin_tokens.js:', e);
     }
   };
 }

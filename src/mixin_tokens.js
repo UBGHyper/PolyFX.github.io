@@ -1,10 +1,19 @@
-// Single source of truth for the exact literal strings PolyModLoader's
-// registerClassMixin matches against V.prototype.update's OWN toString()
-// output (not the whole bundle file — see src/main.mod.js for why that
-// distinction matters). Shared between src/main.mod.js (the real PML
-// mixins), tools/game-bundle.mjs (the direct-patch dev flavor), and
-// test/mixin-tokens.test.mjs, so the two patching mechanisms can't silently
-// drift apart the way they did once already.
+// MIXIN_TOKENS: the exact literal strings the DEV FLAVOR's direct bundle
+// patch (tools/game-bundle.mjs's patchBundle, used by app_src/main.bundle.js
+// for `npm run dev` / `npm run shots`) splices into V.prototype.update's
+// source text. That patch happens ONCE, directly on the file, before it's
+// ever loaded — so the patched code becomes a completely normal part of the
+// module's own source and keeps full closure access to its private fields.
+//
+// The real PolyModLoader flavor (src/main.mod.js) does NOT use these tokens
+// — see that file's header comment for why: PML's registerClassMixin
+// reconstructs the target method via `Function.prototype.toString()` +
+// `eval()`, which rebinds the new function's closure to wherever that eval()
+// runs (PML's own module), not V's — so any reference to V's own closure
+// variables (the WeakMaps backing its private fields, e.g. "k", "M", "E") is
+// silently unreachable there ("(0, i.gn) is not a function" at runtime, not
+// at mixin-registration time). main.mod.js works around this by patching
+// prototypes directly instead of going through registerClassMixin at all.
 //
 // Pure data, no Node APIs — safe to bundle into the browser build.
 export const MIXIN_TOKENS = {
@@ -27,4 +36,15 @@ export const MIXIN_TOKENS = {
 export const RENDERER_ACCESS = {
   moduleId: 1507,
   exportName: 'A',
+};
+
+// Same idea, for the vendored three.js WebGLRenderer class ("Gt" in the
+// 0.6.2 bundle, exported directly as "JeP" — no alias indirection). Reached
+// the same way: `i(9437).JeP`. main.mod.js patches THIS class's own
+// .prototype.render directly (a normal, closure-safe library class, unlike
+// V.prototype.update) instead of trying to reconstruct V's method — see
+// tools/game-bundle.mjs's findThreeRendererAccessPath.
+export const THREE_RENDERER_ACCESS = {
+  moduleId: 9437,
+  exportName: 'JeP',
 };
