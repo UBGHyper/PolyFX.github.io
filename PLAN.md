@@ -149,6 +149,20 @@ simultaneously with custom, non-default colors reach the shader uniforms exactly
 correctly (screenshot: red/white track edges glowing magenta/cyan on request), with the car visibly
 unaffected.
 
+Palette-color scoring is a statistical signal, not a guarantee, and real play surfaced a car
+glowing again after the above fix — so `_sharedScan` also cross-checks every glow candidate's
+root against `carRoots` (the same brake-light-detection mechanism `car_lights.js` already depends
+on to find cars at all) and rejects it outright if they share one, regardless of score. Checked
+*after* the traversal completes rather than during it, since `carRoots` itself is still being
+built during the same pass and isn't guaranteed complete for a given car until all of that car's
+meshes have been visited.
+
+Also fixed: flipping the `GlowingBlocks` PML setting on by itself did nothing visible whenever no
+panel category had been chosen yet (the actual default state) — a real UX gap, not a bug, but one
+that reads exactly like "the menu shows stuff but nothing happens in game." `setEnabled(true)` now
+auto-selects Warning Signs (Yellow) if literally nothing is active, giving immediate confirmation
+the feature works without ever overriding a real choice already made.
+
 Tire smoke's material gets a color tint each frame (`_applySmokeTint`) rather than any real
 lighting — it's a single `MeshBasicMaterial` shared across every smoke instance (same
 one-material-many-parts shape as the track geometry above), so per-instance dynamic lighting isn't

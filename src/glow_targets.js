@@ -52,6 +52,15 @@ export class GlowTargets {
 
   setEnabled(on) {
     this.enabled = on;
+    // Flipping the master switch on with every category still off (the state right after a fresh
+    // install) would silently do nothing at all — the PML setting shows Off/On, the player turns
+    // it On, and nothing changes in-game because no category was ever chosen. Give one sensible
+    // default so there's immediate visible confirmation the feature works, without overriding any
+    // real choice the player already made (this only ever fires when literally nothing is on).
+    if (on && !Array.from(this.categoryState.values()).some((s) => s.on)) {
+      const def = this.categoryState.get('signYellow');
+      if (def) def.on = true;
+    }
     this._apply();
   }
 

@@ -872,6 +872,10 @@ class PolyFX {
     const glowMat = this.glowTargets ? this.glowTargets.material : null;
     let glowMatStillUsed = false;
     const glowCandidatesByMaterial = glowMat ? null : new Map();
+    // Roots seen using each glow candidate — checked against carRoots only *after* the traversal
+    // finishes, since carRoots itself is still being built during the same pass and isn't
+    // guaranteed complete for a given car until all of that car's meshes have been visited.
+    const glowCandidateRoots = glowMat ? null : new Map();
 
     scene.traverse((o) => {
       if (o.userData && o.userData.__polyfxOwned) return;
@@ -882,8 +886,13 @@ class PolyFX {
         if (glowMat) {
           if (m === glowMat) glowMatStillUsed = true;
         } else if (m && m.isMeshLambertMaterial && o.geometry.attributes.color) {
-          if (!glowCandidatesByMaterial.has(m)) glowCandidatesByMaterial.set(m, { material: m, sampleColors: [] });
+          if (!glowCandidatesByMaterial.has(m)) {
+            glowCandidatesByMaterial.set(m, { material: m, sampleColors: [] });
+            glowCandidateRoots.set(m, new Set());
+          }
           glowCandidatesByMaterial.get(m).sampleColors.push(_sampleDistinctVertexColors(o.geometry));
+          const candidateRoot = rootOf(o, scene);
+          if (candidateRoot) glowCandidateRoots.get(m).add(candidateRoot);
         }
       }
       if (!o.isMesh) return;
@@ -898,7 +907,19 @@ class PolyFX {
     if (this.sky) this.sky.ingestLights(dirLights, hemiLights, this._scanIsFirst);
     if (this.glowTargets) {
       if (glowMat && !glowMatStillUsed) this.glowTargets.material = null;
-      else if (!glowMat) this.glowTargets.ingestCandidates(Array.from(glowCandidatesByMaterial.values()));
+      else if (!glowMat) {
+        // Palette-color scoring is a statistical signal, not a guarantee — reject anything that
+        // shares even one root with a recognized car outright, regardless of its score. This is a
+        // structural check (brake-light detection, the same mechanism car_lights.js already
+        // depends on to find cars at all), not a probabilistic one.
+        const safeCandidates = Array.from(glowCandidatesByMaterial.values()).filter((c) => {
+          const roots = glowCandidateRoots.get(c.material);
+          if (!roots) return true;
+          for (const r of roots) if (carRoots.has(r)) return false;
+          return true;
+        });
+        this.glowTargets.ingestCandidates(safeCandidates);
+      }
     }
     if (smokeUnknown) {
       this.smokeMat = smoke || null;
