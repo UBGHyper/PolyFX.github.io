@@ -18,6 +18,8 @@ const TIME_OF_DAY_ID = 'TimeOfDay';
 const UNDERGLOW_ID = 'Underglow';
 const HEADLIGHTS_ID = 'Headlights';
 const OTHER_HEADLIGHTS_ID = 'OtherHeadlights';
+const AMBIENT_OCCLUSION_ID = 'AmbientOcclusion';
+const AUTO_PERF_GUARD_ID = 'AutoPerfGuard';
 const PRESET = { OFF: 0, BALANCED: 1, ENHANCED: 2, SEMI_REAL: 3, PHOTO_REAL: 4, VERY_LOW: 5 };
 const TOD_HOURS = [null, 6.5, 9, 12, 15, 16.8, 18, 22];
 
@@ -55,22 +57,56 @@ function detectCapabilities(renderer) {
 }
 
 class PerfGuard {
-  static STEPS = ['full', 'aoHalf', 'ssrOff', 'godraysOff', 'bloomOff', 'bypass'];
-  static BYPASS_LEVEL = PerfGuard.STEPS.length - 1;
+  // No "bypass" rung — the guard may cut quality, it may never uninstall the mod outright.
+  static STEPS = ['full', 'aoHalf', 'ssrOff', 'godraysOff', 'bloomOff'];
+  static MAX_LEVEL = PerfGuard.STEPS.length - 1;
+  static SUSTAIN_MS = 2000;
+  static HOLD_MS = 3000;
 
   constructor() {
     this.enabled = true;
     this.level = 0;
-    this._lastChangeT = 0;
+    // A running floor of observed frame time, standing in for "this machine's vsync/steady-state
+    // cost" — thresholds are relative to it rather than fixed absolute numbers. A fixed 16ms
+    // recovery floor is *never* reachable on a 60Hz display (its steady frame time is ~16.7ms),
+    // which is why this guard used to degrade freely but could never recover.
+    this.baselineMs = 16.7;
+    this.holdUntil = 0;
+    this._badSinceT = 0;
+    this._goodSinceT = 0;
+  }
+
+  // Suspend judgement for a bit after a change we know isn't the mod's steady-state cost: a
+  // preset switch, a track load, entering/exiting photo mode.
+  hold(ms = PerfGuard.HOLD_MS) {
+    this.holdUntil = performance.now() + ms;
+    this._badSinceT = 0;
+    this._goodSinceT = 0;
   }
 
   update(frameMs, now) {
     if (!this.enabled) return false;
-    if (now - this._lastChangeT < 2500) return false;
-    const bad = frameMs > 34;
-    const good = frameMs < 16;
-    if (bad && this.level < PerfGuard.BYPASS_LEVEL) { this.level++; this._lastChangeT = now; return true; }
-    if (good && this.level > 0) { this.level--; this._lastChangeT = now; return true; }
+    if (now < this.holdUntil) { this._badSinceT = 0; this._goodSinceT = 0; return false; }
+
+    this.baselineMs = frameMs < this.baselineMs ? frameMs : this.baselineMs + (frameMs - this.baselineMs) * 0.01;
+    const degradeAt = Math.max(this.baselineMs * 2, 28);
+    const recoverAt = this.baselineMs * 1.25;
+
+    if (frameMs > degradeAt) { if (!this._badSinceT) this._badSinceT = now; this._goodSinceT = 0; }
+    else if (frameMs < recoverAt) { if (!this._goodSinceT) this._goodSinceT = now; this._badSinceT = 0; }
+    else { this._badSinceT = 0; this._goodSinceT = 0; }
+
+    // Sustained, not instantaneous — a one-off hitch (GC pause, shader compile) shouldn't cost a rung.
+    if (this._badSinceT && now - this._badSinceT > PerfGuard.SUSTAIN_MS && this.level < PerfGuard.MAX_LEVEL) {
+      this.level++; this._badSinceT = 0;
+      console.warn(`[PolyFX] perf guard: degrading to "${this.stepName}" (frame ${frameMs.toFixed(1)}ms vs ${this.baselineMs.toFixed(1)}ms baseline)`);
+      return true;
+    }
+    if (this._goodSinceT && now - this._goodSinceT > PerfGuard.SUSTAIN_MS && this.level > 0) {
+      this.level--; this._goodSinceT = 0;
+      console.info(`[PolyFX] perf guard: recovering to "${this.stepName}"`);
+      return true;
+    }
     return false;
   }
 
@@ -84,9 +120,12 @@ function cfgFor(preset) {
         ao: null, bloom: null, smaa: false, ssr: null, godrays: null,
         grade: { contrast: 1.02, saturation: 1.02, vignette: 0.03, split: 0 } };
     case PRESET.BALANCED:
+      // AO used to be this preset's whole personality; now it's an opt-in setting (default off —
+      // see AmbientOcclusion), so Balanced needs bloom+SMAA of its own to still visibly do
+      // something for players who never touch that toggle.
       return { composer: true, tone: TONE_MODES[DEFAULT_TONE_INDEX].value, exposure: 1, env: false,
         ao: { aoRadius: 2.2, distanceFalloff: 0.9, intensity: 1.6, halfRes: true, screenSpaceRadius: true, aoSamples: 8, denoiseSamples: 4, denoiseRadius: 8 },
-        bloom: null, smaa: false, ssr: null, godrays: null,
+        bloom: { strength: 0.07, radius: 0.45, threshold: 1.2 }, smaa: true, ssr: null, godrays: null,
         grade: { contrast: 1.04, saturation: 1.06, vignette: 0.05, split: 0.12 } };
     case PRESET.ENHANCED:
       return { composer: true, tone: TONE_MODES[DEFAULT_TONE_INDEX].value, exposure: 1, env: true, envIntensity: 0.4,
@@ -103,7 +142,11 @@ function cfgFor(preset) {
       return { composer: true, tone: TONE_MODES[DEFAULT_TONE_INDEX].value, exposure: 1, env: true, envIntensity: 0.7,
         ao: { aoRadius: 5.0, distanceFalloff: 1.1, intensity: 3.2, halfRes: false, screenSpaceRadius: true, aoSamples: 24, denoiseSamples: 16, denoiseRadius: 14 },
         bloom: { strength: 0.17, radius: 0.65, threshold: 0.95 }, smaa: true,
-        ssr: { opacity: 0.22, maxDistance: 12, thickness: 0.11, blur: true },
+        // SSRPass renders its own scene pass and needs to own RenderPass the same way AO now
+        // does; the two have never been made to compose, and previously AO silently discarded
+        // whatever SSR drew. Dropped from presets rather than shipping "on" and invisible — still
+        // reachable from the tuning panel.
+        ssr: null,
         godrays: { intensity: 0.65, density: 0.94, weight: 0.46, decay: 0.96, exposure: 0.15, threshold: 0.84, samples: 56 },
         grade: { contrast: 1.10, saturation: 1.18, vignette: 0.18, split: 0.36 } };
     default:
@@ -282,15 +325,11 @@ class PhotoMode {
     document.body.appendChild(this.hud);
   }
 
+  // Activation (F2) and capture (F9) are real, rebindable PML keybinds registered in
+  // main.mod.js — they call setActive()/set captureQueued directly. This listener only
+  // handles continuous WASD/QE/Shift/Ctrl movement while active, which is held-key polling,
+  // not a discrete action PML's keybind API is meant for.
   _key(e, down) {
-    if (e.code === 'F2' && down && !e.repeat) {
-      this.setActive(!this.active, this.fx.lastCamera);
-      e.preventDefault(); e.stopPropagation(); return;
-    }
-    if (e.code === 'F9' && down && this.active) {
-      this.captureQueued = true;
-      e.preventDefault(); e.stopPropagation(); return;
-    }
     if (!this.active) return;
     const handled = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight'];
     if (handled.includes(e.code)) {
@@ -418,17 +457,18 @@ class PolyFX {
     this.lastCarLightsSetting = null;
     this.otherHeadlightsOverride = null;
     this.lastOtherHeadlightsSetting = null;
+    this.aoOverride = null;
+    this.lastAoSetting = null;
+    this.aoRequested = false;
+    this.aoAvailable = false;
+    this.perfGuardOverride = null;
+    this.lastPerfGuardSetting = null;
 
     this._scanT = 0;
     this._scanIsFirst = true;
 
-    window.addEventListener('keydown', (e) => {
-      if (e.code === 'Backquote' && !e.repeat) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (this.panel) this.panel.toggle();
-      }
-    }, true);
+    // Panel/photo/capture keys are registered as real, rebindable PML keybinds — see
+    // main.mod.js. window.__PolyFX.panel.toggle() etc. are the hooks their callbacks call.
   }
 
   render(renderer, scene, camera, settings, sunDir) {
@@ -454,7 +494,6 @@ class PolyFX {
     let cfg = cfgFor(preset);
     if (this.photo && this.photo.active) cfg = cfgFor(PRESET.PHOTO_REAL);
     const guardLevel = this.perfGuard.enabled ? this.perfGuard.level : 0;
-    if (guardLevel >= PerfGuard.BYPASS_LEVEL) cfg = { composer: false };
 
     if (!cfg.composer || !camera) {
       if (this.orig) this._restore(scene);
@@ -468,8 +507,13 @@ class PolyFX {
     try {
       this._ensure(renderer, scene, camera);
       const photoActive = !!(this.photo && this.photo.active);
-      if (preset !== this.preset || photoActive !== this.photoWasActive || guardLevel !== this._lastAppliedGuardLevel) {
+      const presetChanged = preset !== this.preset;
+      const photoChanged = photoActive !== this.photoWasActive;
+      if (presetChanged || photoChanged || guardLevel !== this._lastAppliedGuardLevel) {
         this._apply(cfg, renderer, scene, camera, guardLevel);
+        // A preset switch or a photo-mode toggle causes its own hitch; don't let that hitch be
+        // mistaken for steady-state cost and used to justify degrading further.
+        if (presetChanged || photoChanged) this.perfGuard.hold();
         this.preset = preset;
         this.photoWasActive = photoActive;
         this._lastAppliedGuardLevel = guardLevel;
@@ -538,6 +582,27 @@ class PolyFX {
         if (this.carLights) this.carLights.cfg.otherHeadlightsEnabled = otherHeadlightsSetting >= 1;
       }
 
+      let aoSetting = this.aoOverride != null ? this.aoOverride : 0;
+      if (this.aoOverride == null) {
+        try { aoSetting = parseInt(window.polyModLoader?.getSetting(AMBIENT_OCCLUSION_ID), 10); } catch (_) {}
+        if (!Number.isFinite(aoSetting)) aoSetting = 0;
+      }
+      if (aoSetting !== this.lastAoSetting) {
+        this.lastAoSetting = aoSetting;
+        this.aoRequested = aoSetting >= 1;
+        this._updateAO();
+      }
+
+      let perfGuardSetting = this.perfGuardOverride != null ? this.perfGuardOverride : 1;
+      if (this.perfGuardOverride == null) {
+        try { perfGuardSetting = parseInt(window.polyModLoader?.getSetting(AUTO_PERF_GUARD_ID), 10); } catch (_) {}
+        if (!Number.isFinite(perfGuardSetting)) perfGuardSetting = 1;
+      }
+      if (perfGuardSetting !== this.lastPerfGuardSetting) {
+        this.lastPerfGuardSetting = perfGuardSetting;
+        this.perfGuard.enabled = perfGuardSetting >= 1;
+      }
+
       if (this.carLights) {
         const dusk = this.skyActive && !this.envOnly && this.sky && this.sky.sunDir.y < 0.1;
         if (this.carLightsEnabled) this.carLights.update(scene, this.headlightsForce || this.weatherHeadlights || dusk, activeCamera);
@@ -575,6 +640,10 @@ class PolyFX {
     this.n8ao = new N8AOPass(scene, camera, w, h);
     this.n8ao.autoDetectTransparency = false;
     this.n8ao.configuration.transparencyAware = false;
+    // N8AOPass sRGB-encodes its own output unconditionally (unlike N8AOPostPass, it has no
+    // autosetGamma guard). OutputPass encodes a second time later in the chain, which is the
+    // "AO overexposes everything" bug — see PLAN.md §5.
+    this.n8ao.configuration.gammaCorrection = false;
     this.bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.1, 0.5, 1.25);
     this.ssr = null;
     this.godrays = new FullscreenShaderPass(GodRaysShader);
@@ -623,12 +692,16 @@ class PolyFX {
     renderer.toneMapping = cfg.tone;
     renderer.toneMappingExposure = cfg.exposure;
 
-    this.n8ao.enabled = !!cfg.ao;
+    // AO's enabled state is driven by the (opt-in, off-by-default) AmbientOcclusion setting, not
+    // by preset — see _updateAO(). cfg.ao only carries this preset's tuning parameters for when
+    // it's on.
+    this.aoAvailable = !!cfg.ao;
     if (cfg.ao) {
       Object.assign(this.n8ao.configuration, cfg.ao);
       if (guardLevel >= 1) this.n8ao.configuration.halfRes = true;
       if (this.n8ao.configuration.color && this.n8ao.configuration.color.set) this.n8ao.configuration.color.set(0x000000);
     }
+    this._updateAO();
 
     this.baseBloomStrength = cfg.bloom ? cfg.bloom.strength : 0;
     this.bloom.enabled = !!cfg.bloom && guardLevel < 4;
@@ -637,7 +710,6 @@ class PolyFX {
     const wantSSR = !!cfg.ssr && guardLevel < 2;
     if (wantSSR) this._ensureSSR(renderer, scene, camera);
     const useSSR = wantSSR && !!this.ssr;
-    this.renderPass.enabled = !useSSR;
     if (this.ssr) {
       this.ssr.enabled = useSSR;
       if (useSSR && cfg.ssr) {
@@ -647,6 +719,7 @@ class PolyFX {
         this.ssr.blur = cfg.ssr.blur;
       }
     }
+    this._updateRenderPassGate();
 
     this.godrays.enabled = !!cfg.godrays && guardLevel < 3;
     if (cfg.godrays) {
@@ -680,6 +753,23 @@ class PolyFX {
       scene.environment = this.orig.environment;
       if ('environmentIntensity' in scene) scene.environmentIntensity = this.orig.environmentIntensity;
     }
+  }
+
+  _updateAO() {
+    if (!this.n8ao) return;
+    this.n8ao.enabled = !!(this.aoAvailable && this.aoRequested);
+    this._updateRenderPassGate();
+  }
+
+  // N8AOPass always renders its own beauty pass internally (autoRenderBeauty) and never reads the
+  // composer's buffer chain at all — so whenever it's the active scene source (same as SSR),
+  // RenderPass rendering the same frame first is pure waste: a full extra scene render, thrown
+  // away unread, every frame.
+  _updateRenderPassGate() {
+    if (!this.renderPass) return;
+    const aoOwnsRender = !!(this.n8ao && this.n8ao.enabled);
+    const ssrOwnsRender = !!(this.ssr && this.ssr.enabled);
+    this.renderPass.enabled = !(aoOwnsRender || ssrOwnsRender);
   }
 
   _sharedScan(scene, force) {
@@ -781,14 +871,20 @@ class PolyFX {
   setPresetOverride(n) { this.presetOverride = n == null ? null : Number(n); }
   setTimeOfDayOverride(n) { this.todOverride = n == null ? null : Number(n); }
   setUnderglowOverride(n) { this.underglowOverride = n == null ? null : Number(n); }
+  setAoOverride(n) { this.aoOverride = n == null ? null : Number(n); }
+  setPerfGuardOverride(n) { this.perfGuardOverride = n == null ? null : Number(n); }
 
   toggleEffect(name, on) {
     switch (name) {
-      case 'ao': if (this.n8ao) this.n8ao.enabled = on; break;
+      case 'ao':
+        this.aoRequested = on;
+        this._updateAO();
+        break;
       case 'bloom': if (this.bloom) this.bloom.enabled = on; break;
       case 'ssr':
         if (on) this._ensureSSR(this.renderer, this.lastScene, this.lastCamera);
-        if (this.ssr) { this.ssr.enabled = on; this.renderPass.enabled = !on; }
+        if (this.ssr) this.ssr.enabled = on;
+        this._updateRenderPassGate();
         break;
       case 'godrays': if (this.godrays) this.godrays.enabled = on; break;
       case 'grade': if (this.grade) this.grade.enabled = on; break;
@@ -1117,7 +1213,7 @@ class PolyFXPanel {
 
     const hint = document.createElement('div');
     hint.className = 'pf-hint';
-    hint.textContent = 'Press ` to close. F2 toggles photo mode; F9 saves a PNG.';
+    hint.textContent = 'Press L to close (rebindable in PolyModLoader keybinds). F2 toggles photo mode; F9 saves a PNG.';
     el.appendChild(hint);
     document.body.appendChild(el);
     this.el = el;
@@ -1190,4 +1286,11 @@ class PolyFXPanel {
 }
 
 window.__PolyFX = new PolyFX();
-console.log('[PolyFX] loaded - press ` for tuning, F2 photo mode, F9 screenshot');
+// Keybinds are registered through PML (see main.mod.js) and don't exist at all in this
+// direct-patch/dev flavor, which never loads main.mod.js — say so instead of naming a key that
+// does nothing here.
+console.log(
+  window.polyModLoader
+    ? '[PolyFX] loaded - L for tuning, F2 photo mode, F9 screenshot (rebindable in PolyModLoader keybinds)'
+    : '[PolyFX] loaded (dev/direct-patch mode, no PolyModLoader keybinds) - try window.__PolyFX.panel.toggle(), .setPresetOverride(n), .setAoOverride(n) from the console',
+);

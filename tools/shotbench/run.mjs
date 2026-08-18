@@ -75,7 +75,11 @@ async function main() {
   if (forceGpu) {
     await page.evaluate(() => {
       window.__PolyFX.caps = { isSoftware: false, rendererString: 'forced (shotbench --force-gpu)' };
-      window.__PolyFX.perfGuard.enabled = false;
+      // A raw property write here gets silently overwritten a frame later by the AutoPerfGuard
+      // PML-setting read in render() (which has no override to defer to otherwise) — same
+      // reason setPresetOverride/setUnderglowOverride exist below instead of writing state
+      // directly.
+      window.__PolyFX.setPerfGuardOverride(0);
     });
   }
 
@@ -109,6 +113,22 @@ async function main() {
     results.push({ key, label, file, fps: null, guardStep: null, state: null });
     console.log(`[shotbench] ${label}: captured`);
   }
+
+  // AO's known bugs (overexposure from double sRGB encoding, and the half-res black-box
+  // compositing bug) should show up as a visible difference between these two frames beyond "AO
+  // added some contact shadows" — same preset, same camera, same lighting, only AO flipped.
+  await page.evaluate((tod) => window.__PolyFX.setTimeOfDayOverride(tod), 0);
+  await page.evaluate(() => window.__PolyFX.setPresetOverride(1));
+  await page.waitForTimeout(600);
+  for (const [key, label, on] of [['ao-off-balanced', 'AO off (Balanced)', 0], ['ao-on-balanced', 'AO on (Balanced)', 1]]) {
+    await page.evaluate((v) => window.__PolyFX.setAoOverride(v), on);
+    await page.waitForTimeout(600);
+    const file = `${key}.png`;
+    await canvas.screenshot({ path: path.join(outDir, file), timeout: 60000 });
+    results.push({ key, label, file, fps: null, guardStep: null, state: null });
+    console.log(`[shotbench] ${label}: captured`);
+  }
+  await page.evaluate(() => window.__PolyFX.setAoOverride(null));
 
   await browser.close();
   server.close();

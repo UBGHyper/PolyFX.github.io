@@ -572,10 +572,10 @@ const $12b21d24d1192a04$export$a815acccbd2c9a49 = {
             sceneDepth,
             vUv
         ).x;
-        #ifdef HALFRES 
-        vec4 texel;
+        #ifdef HALFRES
+        vec4 texel = vec4(0.0);
         if (depth == 1.0) {
-            texel = vec4(0.0, 0.0, 0.0, 1.0);
+            texel = vec4(1.0);
         } else {
         vec3 worldPos = getWorldPos(depth, vUv);
         vec3 normal = computeNormal(getWorldPos(depth, vUv), vUv);

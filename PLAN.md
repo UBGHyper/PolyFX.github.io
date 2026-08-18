@@ -84,20 +84,28 @@ explicitly chosen — activating it unconditionally made Enhanced+ look hazier t
 
 `GraphicsPreset` (PML `SettingType.CUSTOM`, default `1` = Balanced):
 
-| Preset | Tone map | AO | Bloom | SMAA | God rays | SSR | env |
-|---|---|---|---|---|---|---|---|
-| Off (0) | — | — | — | — | — | — | composer bypassed entirely — provably identical to stock |
-| Very Low (5) | Neutral | — | — | — | — | — | grade only |
-| Balanced (1) | Neutral | half-res | — | — | — | — | — |
-| Enhanced (2) | Neutral | full | on | on | — | — | IBL |
-| Semi-Real (3) | Neutral | full | on | on | on | — | IBL |
-| Photoreal (4) | Neutral | full | on | on | on | on | IBL |
+| Preset | Tone map | Bloom | SMAA | God rays | env |
+|---|---|---|---|---|---|
+| Off (0) | — | — | — | — | composer bypassed entirely — provably identical to stock |
+| Very Low (5) | Neutral | — | — | — | grade only |
+| Balanced (1) | Neutral | subtle | on | — | — |
+| Enhanced (2) | Neutral | on | on | — | IBL |
+| Semi-Real (3) | Neutral | on | on | on | IBL |
+| Photoreal (4) | Neutral | on | on | on | IBL |
+
+`AmbientOcclusion` (PML `SettingType.CUSTOM`, default `0` = Off) is a separate, opt-in setting
+independent of preset — every preset except Off/Very Low carries its own AO tuning parameters
+(radius/intensity/samples, half-res on Balanced+Enhanced, full-res on Semi-Real+Photoreal), applied
+only once this setting is on. It was folded into the preset table through 1.0.x, which meant AO's
+cost (and a half-res compositing bug — see §5) landed on everyone at the default preset whether
+they'd asked for shading or not. SSR is no longer offered by any preset (still reachable from the
+tuning panel) for the same reason it and AO can't currently be enabled together — see below.
 
 Tone mapping default is `NeutralToneMapping` (Khronos PBR Neutral), not ACES — ACES desaturates
 content authored with no tone mapping in mind. Also exposed as a live-cyclable panel slider
 (None/Neutral/ACES/AgX).
 
-Also: `TimeOfDay` (Default + 7 named times), `Underglow` (Off/On).
+Also: `TimeOfDay` (Default + 7 named times), `Underglow` (Off/On), `AutoPerfGuard` (Off/On, default On).
 
 ---
 
@@ -107,9 +115,29 @@ Also: `TimeOfDay` (Default + 7 named times), `Underglow` (Off/On).
   (SwiftShader/llvmpipe/"Basic Render Driver") forces the composer off unconditionally, regardless of
   preset.
 - **Adaptive perf guard**: under sustained bad frame time, degrades one rung at a time — AO half-res
-  -> SSR off -> god rays off -> bloom off -> composer bypass — and recovers the same way once there's
-  headroom, with hysteresis so it doesn't thrash. Thresholds (currently 34ms degrade / 16ms recover)
-  were only ever validated under software rendering; real-hardware retuning is open (see ROADMAP).
+  -> SSR off -> god rays off -> bloom off — and recovers the same way once there's headroom, with
+  hysteresis so it doesn't thrash. There is deliberately no "bypass" rung anymore: the guard may cut
+  quality, it may not silently uninstall the mod. Thresholds are relative to a decayed running
+  baseline of observed frame time (this machine's real vsync/steady-state floor), not fixed absolute
+  numbers — degrade above `max(2× baseline, 28ms)`, recover below `1.25× baseline`. A fixed 16ms
+  recovery floor (the pre-1.1 behavior) is mathematically unreachable on a 60Hz display, whose
+  steady-state frame time is ~16.7ms — the guard could degrade but never recover. Both directions now
+  also require ~2s of sustained bad/good frames before acting, and a preset switch, photo-mode
+  toggle, or track load holds judgement for a few seconds so that transition's own hitch isn't read
+  as steady-state cost. Exposed as the `AutoPerfGuard` PML setting (default on), not just the
+  in-game panel.
+- **AO and SSR each need to own the scene render.** `N8AOPass`, unlike `N8AOPostPass`, always
+  renders its own beauty pass internally (`autoRenderBeauty`) and never reads the composer's own
+  buffer chain — the same is true of `SSRPass`. `RenderPass` running first in the chain when either
+  is enabled is a full extra scene render that's computed and then never read.
+  `_updateRenderPassGate()` disables `RenderPass` whenever AO or SSR is the active scene source, and
+  is called from every path that can flip either (preset/guard application, and the manual panel
+  toggles) so it can't drift out of sync. AO and SSR are mutually exclusive by construction, which is
+  the reason SSR was dropped from every preset in 1.1 (see §3) rather than composed with AO.
+- **`N8AOPass.configuration.gammaCorrection` defaults to `true`** and, unlike `N8AOPostPass`, applies
+  it unconditionally rather than only when it's the last pass before the screen. Left at its default
+  it sRGB-encodes mid-chain, and `OutputPass` later in the chain encodes a second time — set to
+  `false` in `_ensure()`.
 - **Off provably costs nothing**: `_ensure()` (which builds the composer/sky/car-lights/underglow) is
   never called at all while the preset stays Off — not "disabled," never constructed.
   `test/stock-safety.test.mjs` asserts this directly.

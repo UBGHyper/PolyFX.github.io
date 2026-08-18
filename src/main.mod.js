@@ -38,6 +38,21 @@ const OTHER_HEADLIGHTS_OPTIONS = [
   { title: 'On', value: '1' },
 ];
 
+const AMBIENT_OCCLUSION_OPTIONS = [
+  { title: 'Off', value: '0' },
+  { title: 'On', value: '1' },
+];
+
+const AUTO_PERF_GUARD_OPTIONS = [
+  { title: 'Off', value: '0' },
+  { title: 'On', value: '1' },
+];
+
+function isTypingTarget() {
+  const el = typeof document !== 'undefined' ? document.activeElement : null;
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+}
+
 class PolyFXShadersMod extends PolyMod {
   init = (pml) => {
     this.pml = pml;
@@ -45,9 +60,37 @@ class PolyFXShadersMod extends PolyMod {
     pml.registerSettingCategory('Realistic Shading');
     pml.registerSetting('Graphics Preset', 'GraphicsPreset', SettingType.CUSTOM, '1', GRAPHICS_PRESET_OPTIONS);
     pml.registerSetting('Time of Day', 'TimeOfDay', SettingType.CUSTOM, '0', TIME_OF_DAY_OPTIONS);
+    pml.registerSetting('Ambient Occlusion', 'AmbientOcclusion', SettingType.CUSTOM, '0', AMBIENT_OCCLUSION_OPTIONS);
     pml.registerSetting('Underglow', 'Underglow', SettingType.CUSTOM, '0', UNDERGLOW_OPTIONS);
     pml.registerSetting('Headlights', 'Headlights', SettingType.CUSTOM, '1', HEADLIGHTS_OPTIONS);
     pml.registerSetting("Other Cars' Headlights", 'OtherHeadlights', SettingType.CUSTOM, '1', OTHER_HEADLIGHTS_OPTIONS);
+    pml.registerSetting('Auto Perf Guard', 'AutoPerfGuard', SettingType.CUSTOM, '1', AUTO_PERF_GUARD_OPTIONS);
+
+    try {
+      pml.registerBindCategory('PolyFX');
+      pml.registerKeybind('Tuning Panel', 'polyfx.panel', 'keydown', 'KeyL', null, (e) => {
+        if (e.repeat || isTypingTarget()) return;
+        const fx = window.__PolyFX;
+        if (!fx || !fx.panel) return;
+        e.preventDefault();
+        fx.panel.toggle();
+      });
+      pml.registerKeybind('Photo Mode', 'polyfx.photo', 'keydown', 'F2', null, (e) => {
+        if (e.repeat || isTypingTarget()) return;
+        const fx = window.__PolyFX;
+        if (!fx || !fx.photo) return;
+        e.preventDefault();
+        fx.photo.setActive(!fx.photo.active, fx.lastCamera);
+      });
+      pml.registerKeybind('Save Screenshot', 'polyfx.capture', 'keydown', 'F9', null, (e) => {
+        const fx = window.__PolyFX;
+        if (!fx || !fx.photo || !fx.photo.active) return;
+        e.preventDefault();
+        fx.photo.captureQueued = true;
+      });
+    } catch (e) {
+      console.error('[PolyFX] keybind registration failed — falling back to no in-game hotkeys:', e);
+    }
 
     try {
       const V = pml.getFromPolyTrack(`i(${RENDERER_ACCESS.moduleId}).${RENDERER_ACCESS.exportName}`);

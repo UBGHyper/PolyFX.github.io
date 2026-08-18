@@ -31,3 +31,13 @@ THE SOFTWARE.
 
 Vendored in `src/vendor/addons/N8AO.js`. Bundled from its original npm package with no license
 header retained in the file — check the upstream N8AO project for its exact terms.
+
+Patched from upstream (1.1.0): in the half-res compositor's bilateral-upsample branch, `vec4 texel;`
+was declared without an initializer and then accumulated into with `+=` — undefined per the GLSL ES
+spec, and a real source of garbage/black-halo pixels on backends that don't happen to zero-init
+locals (ANGLE-on-Metal, notably). The same branch's background early-out also wrote `vec4(0.0, 0.0,
+0.0, 1.0)` for sky pixels where every other AO code path (the AO-computation shader's own
+`depth == 1.0` branch, and the non-half-res compositor path) treats background as fully-unoccluded
+white — the mismatch composited a black tint onto any thin, sky-silhouetted geometry (warning signs,
+in practice) whenever half-res AO was active. Both are now `vec4(0.0)` initialization and `vec4(1.0)`
+for the early-out, matching the rest of the pass.
