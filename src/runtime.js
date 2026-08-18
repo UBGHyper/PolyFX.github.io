@@ -12,6 +12,7 @@ import { CarLights } from './car_lights.js';
 import { Underglow } from './underglow.js';
 import { isBrakeLightMesh, rootOf } from './car_anchor.js';
 import { WeatherEngine, WEATHER_NAMES } from './weather_engine.js';
+import { GlowTargets, GLOW_TARGETS } from './glow_targets.js';
 
 const GRAPHICS_PRESET_ID = 'GraphicsPreset';
 const TIME_OF_DAY_ID = 'TimeOfDay';
@@ -20,6 +21,7 @@ const HEADLIGHTS_ID = 'Headlights';
 const OTHER_HEADLIGHTS_ID = 'OtherHeadlights';
 const AMBIENT_OCCLUSION_ID = 'AmbientOcclusion';
 const AUTO_PERF_GUARD_ID = 'AutoPerfGuard';
+const GLOWING_BLOCKS_ID = 'GlowingBlocks';
 const PRESET = { OFF: 0, BALANCED: 1, ENHANCED: 2, SEMI_REAL: 3, PHOTO_REAL: 4, VERY_LOW: 5 };
 const TOD_HOURS = [null, 6.5, 9, 12, 15, 16.8, 18, 22];
 
@@ -463,6 +465,9 @@ class PolyFX {
     this.carLightsEnabled = true;
     this.bloomDebugHighlight = false;
     this.godraysDebug = false;
+    this.glowTargets = new GlowTargets();
+    this.glowTargetOverride = null;
+    this.lastGlowTargetSetting = null;
     this.photo = null;
     this.photoWasActive = false;
     this.sunOverrideScratch = new THREE.Vector3();
@@ -632,6 +637,16 @@ class PolyFX {
       if (perfGuardSetting !== this.lastPerfGuardSetting) {
         this.lastPerfGuardSetting = perfGuardSetting;
         this.perfGuard.enabled = perfGuardSetting >= 1;
+      }
+
+      let glowTargetSetting = this.glowTargetOverride != null ? this.glowTargetOverride : 0;
+      if (this.glowTargetOverride == null) {
+        try { glowTargetSetting = parseInt(window.polyModLoader?.getSetting(GLOWING_BLOCKS_ID), 10); } catch (_) {}
+        if (!Number.isFinite(glowTargetSetting)) glowTargetSetting = 0;
+      }
+      if (glowTargetSetting !== this.lastGlowTargetSetting) {
+        this.lastGlowTargetSetting = glowTargetSetting;
+        this.glowTargets.setTarget(glowTargetSetting);
       }
 
       if (this.carLights) {
@@ -841,6 +856,7 @@ class PolyFX {
 
     if (this.carLights) this.carLights.ingestRoots(carRoots);
     if (this.sky) this.sky.ingestLights(dirLights, hemiLights, this._scanIsFirst);
+    if (this.glowTargets) this.glowTargets.ingest(scene);
     if (smokeUnknown) {
       this.smokeMat = smoke || null;
       if (this.smokeMat && !this.smokeMat.userData.__polyfxOrigColor) this.smokeMat.userData.__polyfxOrigColor = this.smokeMat.color.clone();
@@ -930,6 +946,7 @@ class PolyFX {
   setUnderglowOverride(n) { this.underglowOverride = n == null ? null : Number(n); }
   setAoOverride(n) { this.aoOverride = n == null ? null : Number(n); }
   setPerfGuardOverride(n) { this.perfGuardOverride = n == null ? null : Number(n); }
+  setGlowTargetOverride(n) { this.glowTargetOverride = n == null ? null : Number(n); }
 
   toggleEffect(name, on) {
     switch (name) {
@@ -1004,6 +1021,7 @@ class PolyFX {
       case 'godrays.intensity': this.godraysStrength = value; break;
       case 'godrays.exposure': if (this.godrays) this.godrays.material.uniforms.exposure.value = value; break;
       case 'godrays.threshold': if (this.godrays) this.godrays.material.uniforms.threshold.value = value; break;
+      case 'glow.intensity': this.glowTargets.setIntensity(value); break;
       case 'grade.contrast': if (this.grade) this.grade.material.uniforms.contrast.value = value; break;
       case 'grade.saturation': if (this.grade) this.grade.material.uniforms.saturation.value = value; break;
       case 'grade.vignette': if (this.grade) this.grade.material.uniforms.vignette.value = value; break;
@@ -1095,6 +1113,7 @@ class PolyFX {
         'godrays.intensity': this.godraysStrength || 0,
         'godrays.exposure': god ? god.exposure.value : 0,
         'godrays.threshold': god ? god.threshold.value : 0,
+        'glow.intensity': this.glowTargets.intensity,
         'grade.contrast': gr ? gr.contrast.value : 1,
         'grade.saturation': gr ? gr.saturation.value : 1,
         'grade.vignette': gr ? gr.vignette.value : 0,
@@ -1189,6 +1208,8 @@ const PANEL_SLIDERS = [
   ['Ray intensity', 'godrays.intensity', 0, 2, 0.01],
   ['Ray exposure', 'godrays.exposure', 0, 0.08, 0.001],
   ['Ray threshold', 'godrays.threshold', 0.3, 6, 0.05],
+  ['Glowing Blocks'],
+  ['Glow intensity', 'glow.intensity', 0, 6, 0.05],
   ['Color Grade'],
   ['Contrast', 'grade.contrast', 0.5, 1.6, 0.01],
   ['Saturation', 'grade.saturation', 0, 2, 0.01],

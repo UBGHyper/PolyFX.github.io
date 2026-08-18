@@ -1,5 +1,6 @@
 import { PolyMod, SettingType } from './vendor/PolyTypes.js';
 import { RENDERER_ACCESS } from './mixin_tokens.js';
+import { GLOW_TARGETS } from './glow_targets.js';
 
 import './runtime.js';
 
@@ -48,6 +49,11 @@ const AUTO_PERF_GUARD_OPTIONS = [
   { title: 'On', value: '1' },
 ];
 
+// Single source of truth is GLOW_TARGETS (glow_targets.js) — the id numbers there are what
+// runtime.js reads back from this exact setting, so option order/values must stay derived from
+// it, not hand-duplicated.
+const GLOWING_BLOCKS_OPTIONS = GLOW_TARGETS.map((t) => ({ title: t.title, value: String(t.id) }));
+
 function isTypingTarget() {
   const el = typeof document !== 'undefined' ? document.activeElement : null;
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
@@ -65,6 +71,7 @@ class PolyFXShadersMod extends PolyMod {
     pml.registerSetting('Headlights', 'Headlights', SettingType.CUSTOM, '1', HEADLIGHTS_OPTIONS);
     pml.registerSetting("Other Cars' Headlights", 'OtherHeadlights', SettingType.CUSTOM, '1', OTHER_HEADLIGHTS_OPTIONS);
     pml.registerSetting('Auto Perf Guard', 'AutoPerfGuard', SettingType.CUSTOM, '1', AUTO_PERF_GUARD_OPTIONS);
+    pml.registerSetting('Glowing Blocks', 'GlowingBlocks', SettingType.CUSTOM, '0', GLOWING_BLOCKS_OPTIONS);
 
     try {
       pml.registerBindCategory('PolyFX');

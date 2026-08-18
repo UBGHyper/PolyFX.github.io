@@ -19,7 +19,8 @@ https://cdn.polymodloader.com/gh/UBGHyper/PolyFX.github.io/main/release
 Settings show up under **Realistic Shading**: Graphics Preset (default Balanced), Time of Day,
 Ambient Occlusion (off by default — see below), Underglow, Headlights, Other Cars' Headlights
 (other cars' headlights are also capped to the closest few regardless of this setting — see
-car_lights.js's `update()` for why), and Auto Perf Guard.
+car_lights.js's `update()` for why), Auto Perf Guard, and Glowing Blocks (off by default — pick one
+track element — warning signs, checkpoints, the finish line, track edges — and it glows).
 
 In-game keybinds live under PolyModLoader's own keybind menu (category **PolyFX**), so they're
 rebindable like any other PML keybind: **L** opens a live tuning panel with every parameter as a

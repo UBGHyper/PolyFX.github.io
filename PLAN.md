@@ -15,7 +15,7 @@ is still accurate and is now encoded in `src/main.mod.js` and `src/car_anchor.js
 src/
   main.mod.js      PolyModLoader entry point — registers settings + the two mixins below
   runtime.js        the PolyFX class: composer, passes, tuning panel, perf guard
-  sky.js  car_lights.js  car_anchor.js  weather_engine.js  underglow.js
+  sky.js  car_lights.js  car_anchor.js  weather_engine.js  underglow.js  glow_targets.js
   vendor/           three r181 + addons, N8AO, PolyTypes.js — all vendored, no npm runtime deps
   pml/              manifest.json, version.json, icon.png, description.html — copied verbatim
 tools/
@@ -106,6 +106,26 @@ content authored with no tone mapping in mind. Also exposed as a live-cyclable p
 (None/Neutral/ACES/AgX).
 
 Also: `TimeOfDay` (Default + 7 named times), `Underglow` (Off/On), `AutoPerfGuard` (Off/On, default On).
+
+`GlowingBlocks` (PML `SettingType.CUSTOM`, default `0` = Off, options + implementation in
+`glow_targets.js`) makes one category of track element emissive — e.g. "Warning Signs (Yellow)",
+"Finish Line & Red Track Edges". This does **not** work by grabbing a material named `SignYellow`
+and setting `.emissive` on it, because no such material exists at runtime: every track-part
+InstancedMesh (confirmed at runtime — 36+ distinct geometries, 8+ distinct baked colors) shares
+exactly **one** `MeshLambertMaterial`, with per-part color coming entirely from a baked per-vertex
+`color` attribute (values bit-identical to the source GLTFs' `baseColorFactor`, confirmed by direct
+comparison). Setting `.emissive` on that shared material would light up the *entire track*, not the
+selected part type. Instead `GlowTargets._patch()` hooks the shared material's `onBeforeCompile`
+once, adds `polyfxGlowTarget`/`polyfxGlowColor`/`polyfxGlowIntensity` uniforms, and inserts a
+per-fragment check right after `#include <emissivemap_fragment>` that compares the built-in
+`vColor` varying against the target color (tight epsilon, `0.015`, since some materials — e.g.
+`Finish` and `RoadEdgeRed` — bake to the exact same color and are therefore not distinguishable at
+this level; the setting's option list is honest about that rather than pretending to offer
+per-material granularity the underlying data doesn't have) and adds the glow color there if it
+matches. Selection therefore happens per-vertex at render time against one already-shared material,
+not by swapping/patching per-part materials. Verified against the real game: white and red track
+edges visibly glow when selected (screenshot A/B — same camera, only the target changed), with no
+change when the target's color isn't present in the current view (no false positives).
 
 ---
 
