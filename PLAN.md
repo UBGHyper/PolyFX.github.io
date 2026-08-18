@@ -138,6 +138,16 @@ Also: `TimeOfDay` (Default + 7 named times), `Underglow` (Off/On), `AutoPerfGuar
   it unconditionally rather than only when it's the last pass before the screen. Left at its default
   it sRGB-encodes mid-chain, and `OutputPass` later in the chain encodes a second time — set to
   `false` in `_ensure()`.
+- **Bloom has no protection against non-finite HDR input.** `LuminosityHighPassShader` (bloom's first
+  step) read the scene's raw linear color unclamped; a single NaN/Infinity/absurd pixel survives
+  `UnrealBloomPass`'s five downsample levels and, at the coarsest mip, one bad texel's blur kernel
+  covers a large fraction of the frame — this is the actual mechanism behind the long-reported
+  "warning signs cause a black box" bug (confirmed by disabling Bloom alone making it go away; an
+  earlier, real N8AO half-res bug — see `THIRD_PARTY_LICENSES.md` — turned out not to be the one
+  players were hitting). Patched in 1.1.1 with an explicit NaN guard plus a magnitude clamp, and a
+  `debugHighlightNonFinite` uniform (panel: "Highlight Bloom Overflow") that renders caught pixels as
+  a large finite magenta value instead of zero so the problem region is visible on screen rather than
+  just suppressed.
 - **Off provably costs nothing**: `_ensure()` (which builds the composer/sky/car-lights/underglow) is
   never called at all while the preset stays Off — not "disabled," never constructed.
   `test/stock-safety.test.mjs` asserts this directly.

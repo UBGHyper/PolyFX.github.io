@@ -41,3 +41,25 @@ locals (ANGLE-on-Metal, notably). The same branch's background early-out also wr
 white — the mismatch composited a black tint onto any thin, sky-silhouetted geometry (warning signs,
 in practice) whenever half-res AO was active. Both are now `vec4(0.0)` initialization and `vec4(1.0)`
 for the early-out, matching the rest of the pass.
+
+This was a real, independently-confirmed bug, but turned out not to be *the* warning-sign black-box
+players kept reporting — user testing (turning Bloom off made it go away, not AO) pointed at
+`UnrealBloomPass`/`LuminosityHighPassShader` instead. See that section below.
+
+## three.js addons — UnrealBloomPass / LuminosityHighPassShader
+
+Vendored in `src/vendor/addons/postprocessing/UnrealBloomPass.js` and
+`src/vendor/addons/shaders/LuminosityHighPassShader.js` (r181, same license as three.js above).
+
+Patched (1.1.1): `LuminosityHighPassShader` read the scene's raw linear HDR color with no bounds
+checking at all — the very first step in bloom's pipeline. A single non-finite (NaN/Infinity) or
+absurdly large pixel there survives five levels of Gaussian downsampling in `UnrealBloomPass`; at
+the coarsest mip (roughly 1/32 resolution) one bad texel's blur kernel covers a large fraction of
+the entire mip, and additive-composites back across a correspondingly large fraction of the final
+frame — consistent with reports of a black rectangle flashing across half the screen specifically
+near warning signs (thin, double-sided, grazing-angle-lit geometry is a plausible source of an
+unstable one-frame shading spike). Added an explicit NaN guard (`c != c`, reliable in every GLSL
+version, unlike `clamp()`/`min()` with a NaN operand which the spec leaves implementation-defined)
+plus a magnitude clamp, and a `debugHighlightNonFinite` uniform (PolyFX panel: "Highlight Bloom
+Overflow") that renders caught pixels as a large finite magenta value instead of zero, so the
+bloom itself makes the culprit region visible on screen instead of merely suppressing it silently.

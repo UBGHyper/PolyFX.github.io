@@ -432,6 +432,7 @@ class PolyFX {
     this.headlightsForce = false;
     this.weatherHeadlights = false;
     this.carLightsEnabled = true;
+    this.bloomDebugHighlight = false;
     this.photo = null;
     this.photoWasActive = false;
     this.sunOverrideScratch = new THREE.Vector3();
@@ -900,6 +901,10 @@ class PolyFX {
       case 'headlightsForce': this.headlightsForce = on; break;
       case 'photo': if (this.photo) this.photo.setActive(on, this.lastCamera); break;
       case 'lightning': this.weather.lightning = on; break;
+      case 'bloomDebug':
+        this.bloomDebugHighlight = on;
+        if (this.bloom) this.bloom.highPassUniforms['debugHighlightNonFinite'].value = on;
+        break;
     }
   }
 
@@ -928,6 +933,7 @@ class PolyFX {
       case 'ao.radius': if (this.n8ao) this.n8ao.configuration.aoRadius = value; break;
       case 'ao.falloff': if (this.n8ao) this.n8ao.configuration.distanceFalloff = value; break;
       case 'ao.halfRes': if (this.n8ao) this.n8ao.configuration.halfRes = value >= 0.5; break;
+      case 'ao.renderMode': if (this.n8ao) this.n8ao.configuration.renderMode = Math.round(value); break;
       case 'bloom.strength': if (this.bloom) { this.baseBloomStrength = value; this.bloom.strength = value; } break;
       case 'bloom.radius': if (this.bloom) this.bloom.radius = value; break;
       case 'bloom.threshold': if (this.bloom) this.bloom.threshold = value; break;
@@ -995,6 +1001,7 @@ class PolyFX {
         headlightsForce: this.headlightsForce,
         photo: !!(this.photo && this.photo.active),
         lightning: !!this.weather.lightning,
+        bloomDebug: this.bloomDebugHighlight,
       },
       params: {
         'weather.preset': this.weather.preset,
@@ -1016,6 +1023,7 @@ class PolyFX {
         'ao.radius': this.n8ao ? this.n8ao.configuration.aoRadius : 0,
         'ao.falloff': this.n8ao ? this.n8ao.configuration.distanceFalloff : 0,
         'ao.halfRes': this.n8ao && this.n8ao.configuration.halfRes ? 1 : 0,
+        'ao.renderMode': this.n8ao ? this.n8ao.configuration.renderMode : 0,
         'bloom.strength': this.bloom ? this.bloom.strength : 0,
         'bloom.radius': this.bloom ? this.bloom.radius : 0,
         'bloom.threshold': this.bloom ? this.bloom.threshold : 0,
@@ -1076,6 +1084,8 @@ const PANEL_TOGGLES = [
   ['headlightsForce', 'Force Headlights'],
   ['photo', 'Photo Mode'],
   ...(WEATHER_ENABLED ? [['lightning', 'Lightning']] : []),
+  ['Debug'],
+  ['bloomDebug', 'Highlight Bloom Overflow (magenta)'],
 ];
 const PANEL_SLIDERS = [
   ...(WEATHER_ENABLED ? [
@@ -1103,6 +1113,7 @@ const PANEL_SLIDERS = [
   ['AO radius', 'ao.radius', 0.1, 6, 0.05],
   ['AO falloff', 'ao.falloff', 0.1, 4, 0.05],
   ['AO half-res', 'ao.halfRes', 0, 1, 1],
+  ['AO render mode (0 combined, 1 AO only, 2 no AO, 3 split, 4 split AO)', 'ao.renderMode', 0, 4, 1],
   ['Bloom'],
   ['Bloom strength', 'bloom.strength', 0, 1.5, 0.01],
   ['Bloom radius', 'bloom.radius', 0, 1, 0.01],
