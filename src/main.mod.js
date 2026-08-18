@@ -68,21 +68,27 @@ class PolyFXShadersMod extends PolyMod {
 
     try {
       pml.registerBindCategory('PolyFX');
-      pml.registerKeybind('Tuning Panel', 'polyfx.panel', 'keydown', 'KeyL', null, (e) => {
+      // PolyModLoader splices `id` directly into generated enum-construction code as a bare
+      // identifier (`${Variables.KeybindEnum}.${id}` inside its own registerKeybind — see its
+      // source) — a dotted id like 'polyfx.panel' parses as property access into a nonexistent
+      // nested object instead of a flat key, throwing "Cannot set/read properties of undefined"
+      // both at registration and on every keydown. Same flat-identifier constraint registerSetting
+      // already requires; keybind ids just weren't tested against it until this broke live.
+      pml.registerKeybind('Tuning Panel', 'PolyfxPanelToggle', 'keydown', 'KeyL', null, (e) => {
         if (e.repeat || isTypingTarget()) return;
         const fx = window.__PolyFX;
         if (!fx || !fx.panel) return;
         e.preventDefault();
         fx.panel.toggle();
       });
-      pml.registerKeybind('Photo Mode', 'polyfx.photo', 'keydown', 'F2', null, (e) => {
+      pml.registerKeybind('Photo Mode', 'PolyfxPhotoMode', 'keydown', 'F2', null, (e) => {
         if (e.repeat || isTypingTarget()) return;
         const fx = window.__PolyFX;
         if (!fx || !fx.photo) return;
         e.preventDefault();
         fx.photo.setActive(!fx.photo.active, fx.lastCamera);
       });
-      pml.registerKeybind('Save Screenshot', 'polyfx.capture', 'keydown', 'F9', null, (e) => {
+      pml.registerKeybind('Save Screenshot', 'PolyfxScreenshot', 'keydown', 'F9', null, (e) => {
         const fx = window.__PolyFX;
         if (!fx || !fx.photo || !fx.photo.active) return;
         e.preventDefault();
