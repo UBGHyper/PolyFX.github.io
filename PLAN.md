@@ -127,6 +127,19 @@ not by swapping/patching per-part materials. Verified against the real game: whi
 edges visibly glow when selected (screenshot A/B — same camera, only the target changed), with no
 change when the target's color isn't present in the current view (no false positives).
 
+Tire smoke's material gets a color tint each frame (`_applySmokeTint`) rather than any real
+lighting — it's a single `MeshBasicMaterial` shared across every smoke instance (same
+one-material-many-parts shape as the track geometry above), so per-instance dynamic lighting isn't
+free. Before 1.1.6 that tint only applied while an explicit `TimeOfDay` was chosen
+(`SkySystem.ambientTint`, only maintained on that code path); Default time of day — the actual
+default, and so the most common case — fell all the way back to smoke's original flat color with
+no lighting response at all. `SkySystem.getStockAmbientTint()` fixes that by reading the stock
+scene's own current directional/hemisphere lights directly (captured by `ingestLights`, valid
+regardless of whether PolyFX's own procedural sky is engaged), so smoke now tints correctly in
+every mode. Verified at the data level (`sky.getStockAmbientTint()` returns different, sensible
+colors under Default/Night/Golden Hour) — not confirmed against actual on-screen smoke, since that
+needs live drifting to spawn, which isn't scriptable without driving input.
+
 ---
 
 ## 4. Performance safeguards

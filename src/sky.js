@@ -184,6 +184,23 @@ export class SkySystem {
     };
   }
 
+  // ambientTint (used pre-1.1.6 for smoke tinting) is only ever computed on the non-envOnly path
+  // in update() below — during Default time of day (envOnly, the actual default most players are
+  // in) it's stale or never-set, which is why smoke tinting had to skip it entirely rather than
+  // risk using a wrong value. This instead reads directly from the stock scene's own
+  // directional/hemisphere lights (captured by ingestLights, always current regardless of
+  // envOnly), so it's valid in every mode — not just when PolyFX's own procedural sky is fully
+  // engaged.
+  getStockAmbientTint(out) {
+    const dir = this._lights.dir[0];
+    const hemi = this._lights.hemi[0];
+    if (!dir && !hemi) return out.set(1, 1, 1);
+    const sunColor = dir ? dir.color : hemi.color;
+    const skyColor = hemi ? hemi.color : sunColor;
+    const brightness = THREE.MathUtils.clamp(((dir ? dir.intensity : 0) + (hemi ? hemi.intensity : 0) * 0.5) / 2.2, 0.35, 1.3);
+    return out.copy(sunColor).lerp(skyColor, 0.5).multiplyScalar(brightness);
+  }
+
   ingestLights(dir, hemi, capture) {
     if (capture || !this._origLights) this._origLights = new Map();
     for (const l of dir) if (!this._origLights.has(l)) this._origLights.set(l, { color: l.color.clone(), intensity: l.intensity });

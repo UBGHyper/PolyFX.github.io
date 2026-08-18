@@ -471,6 +471,7 @@ class PolyFX {
     this.photo = null;
     this.photoWasActive = false;
     this.sunOverrideScratch = new THREE.Vector3();
+    this.smokeTintScratch = new THREE.Color();
     this.smokeMat = undefined;
     this.frameMs = 16.7;
     this.frameT = 0;
@@ -877,8 +878,14 @@ class PolyFX {
 
   _applySmokeTint(scene) {
     if (!this.smokeMat) return;
-    if (this.skyActive && !this.envOnly && this.sky) this.smokeMat.color.copy(this.sky.ambientTint);
-    else this.smokeMat.color.copy(this.smokeMat.userData.__polyfxOrigColor);
+    if (!this.sky) { this.smokeMat.color.copy(this.smokeMat.userData.__polyfxOrigColor); return; }
+    // ambientTint is only maintained while the full procedural sky is engaged (an explicit time
+    // of day chosen) — see the comment on getStockAmbientTint. Default time of day (envOnly, the
+    // actual default) used to fall all the way back to the smoke's original flat color with no
+    // lighting response at all; now it reads the stock scene's own current lights instead, so
+    // smoke tints correctly in every mode, not just when an explicit time of day is picked.
+    if (this.skyActive && !this.envOnly) this.smokeMat.color.copy(this.sky.ambientTint);
+    else this.smokeMat.color.copy(this.sky.getStockAmbientTint(this.smokeTintScratch));
   }
 
   _restore(scene) {
