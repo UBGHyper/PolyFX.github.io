@@ -26,6 +26,16 @@ const PRESETS = [
   { key: 'photoreal', value: 4, label: 'Photoreal' },
 ];
 const NIGHT_TOD = 7;
+const TOD_OPTIONS = [
+  { value: 0, key: 'default', label: 'Default' },
+  { value: 1, key: 'dawn', label: 'Dawn' },
+  { value: 2, key: 'morning', label: 'Morning' },
+  { value: 3, key: 'noon', label: 'Noon' },
+  { value: 4, key: 'afternoon', label: 'Afternoon' },
+  { value: 5, key: 'golden-hour', label: 'Golden Hour' },
+  { value: 6, key: 'sunset', label: 'Sunset' },
+  { value: 7, key: 'night', label: 'Night' },
+];
 
 async function compareMode(dirA, dirB) {
   const a = JSON.parse(fs.readFileSync(path.join(dirA, 'perf.json'), 'utf8'));
@@ -129,6 +139,80 @@ async function main() {
     console.log(`[shotbench] ${label}: captured`);
   }
   await page.evaluate(() => window.__PolyFX.setAoOverride(null));
+
+  // God rays' threshold check runs against the full rendered frame with no depth/sky mask, so
+  // anything bright enough counts as "light source material" for the ray march — not just the
+  // sun. Measured directly (godrays-repro run): at the stock 0.84-0.9 threshold, the entire sky
+  // dome crosses it, and so does the car's own windshield/rims — a ray walking from a windshield
+  // pixel toward the sun re-samples nearby car geometry before ever reaching real sky, which is
+  // the reported "duplicated car" ghosting. Sweep every Time of Day at Photoreal (the only preset
+  // with godrays.samples this high) capturing the normal frame, the debugShowThreshold view, and
+  // the whole-frame fraction of pixels crossing threshold — that fraction is the real regression
+  // signal (a well-tuned threshold should isolate the sun disc, not paint the whole sky).
+  const godraysDir = path.join(outDir, 'godrays-sweep');
+  fs.mkdirSync(godraysDir, { recursive: true });
+  await page.evaluate(() => window.__PolyFX.setPresetOverride(4)); // Photoreal
+  const godraysResults = [];
+  for (const tod of TOD_OPTIONS) {
+    await page.evaluate((v) => window.__PolyFX.setTimeOfDayOverride(v), tod.value);
+    await page.waitForTimeout(1000);
+
+    const normalFile = `${tod.key}-normal.png`;
+    await canvas.screenshot({ path: path.join(godraysDir, normalFile), timeout: 60000 });
+
+    await page.evaluate(() => window.__PolyFX.toggleEffect('godraysDebug', true));
+    await page.waitForTimeout(300);
+    const debugFile = `${tod.key}-debug.png`;
+    await canvas.screenshot({ path: path.join(godraysDir, debugFile), timeout: 60000 });
+    await page.evaluate(() => window.__PolyFX.toggleEffect('godraysDebug', false));
+
+    // A raw "is this pixel cyan-ish" color guess false-positives on ordinary sky blue (b>r and
+    // g>r are both already true for a normal blue sky, debug tint or not) — diffing against the
+    // normal frame captured moments earlier at identical camera/lighting is what actually
+    // isolates pixels the debug shader touched. Reading the live #screen canvas via getImageData
+    // in a later tick returns a blank buffer (no preserveDrawingBuffer), so both PNGs get loaded
+    // as data URLs into fresh <img> elements instead of read from the canvas directly.
+    const normalPngB64 = fs.readFileSync(path.join(godraysDir, normalFile)).toString('base64');
+    const debugPngB64 = fs.readFileSync(path.join(godraysDir, debugFile)).toString('base64');
+    const thresholdFraction = await page.evaluate(async ({ normalB64, debugB64 }) => {
+      async function pixelsOf(b64) {
+        const img = new Image();
+        const loaded = new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
+        img.src = `data:image/png;base64,${b64}`;
+        await loaded;
+        const c = document.createElement('canvas');
+        c.width = img.naturalWidth; c.height = img.naturalHeight;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        return ctx.getImageData(0, 0, c.width, c.height).data;
+      }
+      const [normalData, debugData] = await Promise.all([pixelsOf(normalB64), pixelsOf(debugB64)]);
+      // debugShowThreshold does mix(base, vec3(0,3,3), over) — a real hit shifts blue/green up
+      // and red down or flat relative to the same pixel in the normal frame; requiring that
+      // specific direction (not just "any difference") rules out frame-to-frame noise (cloud
+      // drift, SMAA jitter) as a false positive.
+      let over = 0, total = 0;
+      for (let i = 0; i < debugData.length; i += 4) {
+        const dr = debugData[i] - normalData[i];
+        const dg = debugData[i + 1] - normalData[i + 1];
+        const db = debugData[i + 2] - normalData[i + 2];
+        if ((db > 12 || dg > 12) && dr <= 4) over++;
+        total++;
+      }
+      return total ? over / total : 0;
+    }, { normalB64: normalPngB64, debugB64: debugPngB64 });
+
+    const state = await page.evaluate(() => {
+      const fx = window.__PolyFX;
+      return { sunPosition: fx.godrays.material.uniforms.sunPosition.value, intensity: fx.godrays.material.uniforms.intensity.value, threshold: fx.godrays.material.uniforms.threshold.value };
+    });
+
+    console.log(`[shotbench] godrays @ ${tod.label}: sunPos=(${state.sunPosition.x.toFixed(2)},${state.sunPosition.y.toFixed(2)}) intensity=${state.intensity.toFixed(3)} threshold=${state.threshold} aboveThreshold=${(thresholdFraction * 100).toFixed(1)}% of frame`);
+    godraysResults.push({ key: tod.key, label: tod.label, normalFile: `godrays-sweep/${normalFile}`, debugFile: `godrays-sweep/${debugFile}`, sunPosition: state.sunPosition, intensity: state.intensity, threshold: state.threshold, aboveThresholdFraction: thresholdFraction });
+  }
+  await page.evaluate(() => window.__PolyFX.setTimeOfDayOverride(null));
+  await page.evaluate(() => window.__PolyFX.setPresetOverride(null));
+  fs.writeFileSync(path.join(godraysDir, 'godrays.json'), JSON.stringify({ results: godraysResults }, null, 2));
 
   await browser.close();
   server.close();

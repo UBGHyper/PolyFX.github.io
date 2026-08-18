@@ -148,16 +148,31 @@ Also: `TimeOfDay` (Default + 7 named times), `Underglow` (Off/On), `AutoPerfGuar
   `debugHighlightNonFinite` uniform (panel: "Highlight Bloom Overflow") that renders caught pixels as
   a large finite magenta value instead of zero so the problem region is visible on screen rather than
   just suppressed.
-- **God rays are next suspected of the same class of bug** (a shadow-map pattern smearing into a
-  wedge, reported separately from the bloom black box) — `GodRaysShader`'s radial sampler clamps
-  off-screen rays to the nearest edge pixel and re-samples it repeatedly, and its threshold check
-  runs on the same pre-tonemap linear HDR as bloom's, so a dark-looking (post-tonemap) shadow can
-  still cross threshold in linear space. Not yet confirmed or fixed — 1.1.3 ships only the diagnostic
-  tooling: a `godraysDebug` panel toggle draws a crosshair at the shader's actual `sunPosition` (a
-  `.polyfx-sun-marker` DOM overlay, updated from `_updateSun()`) and switches the pass to a
-  `debugShowThreshold` mode that tints any above-threshold pixel cyan instead of accumulating rays,
-  so both halves of the hypothesis — "is the sun projecting near the car" and "is the shadow really
-  crossing threshold" — are visible directly instead of inferred.
+- **God rays' threshold check was structurally broken, not just badly tuned.** `smoothstep(threshold,
+  1.0, lum)` hardcoded `1.0` as the upper edge — sensible only if scene luminance is normalized into
+  roughly [0,1], but this pipeline runs on raw linear HDR (pre-tonemap, same as bloom), where ordinary
+  daytime sky luminance already exceeds 1.0. That made the "bright enough to feed the rays" test
+  degenerate two ways: below 1.0 it was nearly a step function with almost no falloff band, so any
+  threshold in the shipped 0-1.2 slider range was crossed by most of the sky, not just the sun disc
+  (confirmed empirically at 43-93% of the frame across most daytime times of day — see
+  `tools/shotbench/run.mjs`'s `godrays-sweep` section); above 1.0, smoothstep's `edge0 > edge1` case
+  is undefined per the GLSL spec, so raising the panel's own threshold slider produced non-monotonic
+  results. This is the actual cause of both symptoms reported: the whole screen washing toward one
+  flat amber tone at any daytime hour, and the car's own bright surfaces (windshield, rims) getting
+  ray-marched into duplicate/ghost copies of themselves once nearly everything on screen counted as
+  "light source material." Fixed by scaling the falloff band with `threshold` itself
+  (`smoothstep(threshold, threshold+max(threshold*0.5,0.05), lum)`, matching the non-degenerate
+  pattern `LuminosityHighPassShader` already used for bloom's own threshold), and retuning
+  `threshold`/`exposure` together per preset against the corrected formula (Semi-Real 2.4/0.016,
+  Photoreal 2.0/0.022 — the old 0.84-0.88/0.11-0.15 pairs were tuned against the broken formula's
+  behavior). Verified against the real extracted game across all 8 times of day: above-threshold
+  coverage dropped to 0-8.8% of frame (was 0-93%), and the rendered result at Dawn/Morning — the
+  worst offenders before — now shows a normal-looking scene with a contained glow near the sun
+  instead of a scene-wide wash.
+  The `godraysDebug` panel toggle (a `.polyfx-sun-marker` crosshair at the shader's actual
+  `sunPosition`, plus a `debugShowThreshold` mode that tints above-threshold pixels cyan instead of
+  accumulating rays) is what made this diagnosable in the first place, and stays in the panel for
+  any future god-ray regressions.
 - **Off provably costs nothing**: `_ensure()` (which builds the composer/sky/car-lights/underglow) is
   never called at all while the preset stays Off — not "disabled," never constructed.
   `test/stock-safety.test.mjs` asserts this directly.

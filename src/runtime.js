@@ -136,7 +136,12 @@ function cfgFor(preset) {
       return { composer: true, tone: TONE_MODES[DEFAULT_TONE_INDEX].value, exposure: 1, env: true, envIntensity: 0.55,
         ao: { aoRadius: 4.2, distanceFalloff: 1.05, intensity: 2.6, halfRes: false, screenSpaceRadius: true, aoSamples: 20, denoiseSamples: 10, denoiseRadius: 12 },
         bloom: { strength: 0.13, radius: 0.58, threshold: 1.05 }, smaa: true, ssr: null,
-        godrays: { intensity: 0.4, density: 0.9, weight: 0.42, decay: 0.95, exposure: 0.11, threshold: 0.88, samples: 32 },
+        // threshold/exposure retuned together (see GodRaysShader's smoothWidth comment) — the old
+        // 0.88/0.11 pair was picked against a broken smoothstep that made ~80% of a daytime sky
+        // "bright enough" to feed rays, so the whole screen washed toward one flat amber tone
+        // (the "god rays look bad" report). Empirically verified (tools/shotbench/_dawn-check.mjs,
+        // _exposure-check.mjs): 2.4/0.016 isolates the actual sun glow instead of the whole sky.
+        godrays: { intensity: 0.4, density: 0.9, weight: 0.42, decay: 0.95, exposure: 0.016, threshold: 2.4, samples: 32 },
         grade: { contrast: 1.08, saturation: 1.14, vignette: 0.14, split: 0.30 } };
     case PRESET.PHOTO_REAL:
       return { composer: true, tone: TONE_MODES[DEFAULT_TONE_INDEX].value, exposure: 1, env: true, envIntensity: 0.7,
@@ -147,7 +152,7 @@ function cfgFor(preset) {
         // whatever SSR drew. Dropped from presets rather than shipping "on" and invisible — still
         // reachable from the tuning panel.
         ssr: null,
-        godrays: { intensity: 0.65, density: 0.94, weight: 0.46, decay: 0.96, exposure: 0.15, threshold: 0.84, samples: 56 },
+        godrays: { intensity: 0.65, density: 0.94, weight: 0.46, decay: 0.96, exposure: 0.022, threshold: 2.0, samples: 56 },
         grade: { contrast: 1.10, saturation: 1.18, vignette: 0.18, split: 0.36 } };
     default:
       return { composer: false };
@@ -235,13 +240,26 @@ const GodRaysShader = {
     const int MAX_SAMPLES=56;
     void main(){
       vec4 base=texture2D(tDiffuse,vUv);
-      // Shows exactly which pixels count as "bright enough to feed the rays" (linear HDR,
-      // pre-tonemap — see PLAN.md) without the accumulation/smear on top, so a shadow or other
-      // dark-on-screen region that's secretly crossing threshold in linear space is visible
-      // directly instead of only inferred from the smeared result.
+      // smoothstep's upper edge was hardcoded to 1.0, which only makes sense if scene luminance
+      // is normalized into roughly [0,1] — this pipeline runs on raw linear HDR (pre-tonemap,
+      // same as bloom), where ordinary sky luminance already exceeds 1.0. That made the "bright
+      // enough" test degenerate two ways: below 1.0 it was nearly a step function with almost no
+      // falloff band, so any threshold in the shipped 0-1.2 slider range was crossed by most of
+      // the sky, not just the sun disc; above 1.0 smoothstep's edge0>edge1 case is undefined per
+      // the GLSL spec and produced non-monotonic results entirely (confirmed empirically — see
+      // tools/shotbench/_threshold-sweep.mjs). Scaling the falloff band with threshold itself
+      // (matching how LuminosityHighPassShader already does luminosityThreshold+smoothWidth,
+      // just proportional instead of a fixed 0.01) fixes both: it stays well-defined at any
+      // threshold, and gives an actual soft falloff band around the true cutoff instead of a
+      // near-binary one.
+      float lum=dot(base.rgb,vec3(0.299,0.587,0.114));
+      float smoothWidth=max(threshold*0.5,0.05);
+      float over=smoothstep(threshold,threshold+smoothWidth,lum);
+      // Shows exactly which pixels count as "bright enough to feed the rays" without the
+      // accumulation/smear on top, so a shadow or other dark-on-screen region that's secretly
+      // crossing threshold in linear space is visible directly instead of only inferred from the
+      // smeared result.
       if(debugShowThreshold){
-        float lum=dot(base.rgb,vec3(0.299,0.587,0.114));
-        float over=smoothstep(threshold,1.0,lum);
         gl_FragColor=vec4(mix(base.rgb,vec3(0.0,3.0,3.0),over),base.a);
         return;
       }
@@ -254,8 +272,8 @@ const GodRaysShader = {
         if(i>=sampleCount) break;
         tc-=delta;
         vec3 s=texture2D(tDiffuse,clamp(tc,0.0,1.0)).rgb;
-        float lum=dot(s,vec3(0.299,0.587,0.114));
-        acc+=s*smoothstep(threshold,1.0,lum)*(illum*weight);
+        float sLum=dot(s,vec3(0.299,0.587,0.114));
+        acc+=s*smoothstep(threshold,threshold+smoothWidth,sLum)*(illum*weight);
         illum*=decay;
       }
       gl_FragColor=vec4(base.rgb+acc*exposure*intensity*tint,base.a);
@@ -1169,8 +1187,8 @@ const PANEL_SLIDERS = [
   ['SSR thickness', 'ssr.thickness', 0, 0.5, 0.005],
   ['God Rays'],
   ['Ray intensity', 'godrays.intensity', 0, 2, 0.01],
-  ['Ray exposure', 'godrays.exposure', 0, 0.5, 0.005],
-  ['Ray threshold', 'godrays.threshold', 0, 1.2, 0.01],
+  ['Ray exposure', 'godrays.exposure', 0, 0.08, 0.001],
+  ['Ray threshold', 'godrays.threshold', 0.3, 6, 0.05],
   ['Color Grade'],
   ['Contrast', 'grade.contrast', 0.5, 1.6, 0.01],
   ['Saturation', 'grade.saturation', 0, 2, 0.01],
