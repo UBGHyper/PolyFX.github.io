@@ -12,7 +12,7 @@ import { CarLights } from './car_lights.js';
 import { Underglow } from './underglow.js';
 import { isBrakeLightMesh, rootOf } from './car_anchor.js';
 import { WeatherEngine, WEATHER_NAMES } from './weather_engine.js';
-import { GlowTargets, GLOW_TARGETS } from './glow_targets.js';
+import { GlowTargets, GLOW_CATEGORIES } from './glow_targets.js';
 
 const GRAPHICS_PRESET_ID = 'GraphicsPreset';
 const TIME_OF_DAY_ID = 'TimeOfDay';
@@ -34,6 +34,24 @@ const TONE_MODES = [
   { name: 'AgX', value: THREE.AgXToneMapping },
 ];
 const DEFAULT_TONE_INDEX = 1;
+
+// Strided, capped sampling — geometries here range from 18 to 3470+ vertices, and this runs once
+// per candidate material during glow-target detection (see _sharedScan), not per frame, but still
+// shouldn't scale with geometry size.
+function _sampleDistinctVertexColors(geometry, maxDistinct = 4, maxScan = 400) {
+  const attr = geometry.attributes.color;
+  if (!attr) return [];
+  const out = [];
+  const seen = new Set();
+  const step = Math.max(1, Math.floor(attr.count / maxScan));
+  for (let i = 0; i < attr.count && out.length < maxDistinct; i += step) {
+    const key = `${attr.getX(i).toFixed(3)},${attr.getY(i).toFixed(3)},${attr.getZ(i).toFixed(3)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push([attr.getX(i), attr.getY(i), attr.getZ(i)]);
+  }
+  return out;
+}
 
 function detectCapabilities(renderer) {
   let rendererString = '';
@@ -466,8 +484,8 @@ class PolyFX {
     this.bloomDebugHighlight = false;
     this.godraysDebug = false;
     this.glowTargets = new GlowTargets();
-    this.glowTargetOverride = null;
-    this.lastGlowTargetSetting = null;
+    this.glowEnabledOverride = null;
+    this.lastGlowEnabledSetting = null;
     this.photo = null;
     this.photoWasActive = false;
     this.sunOverrideScratch = new THREE.Vector3();
@@ -640,14 +658,17 @@ class PolyFX {
         this.perfGuard.enabled = perfGuardSetting >= 1;
       }
 
-      let glowTargetSetting = this.glowTargetOverride != null ? this.glowTargetOverride : 0;
-      if (this.glowTargetOverride == null) {
-        try { glowTargetSetting = parseInt(window.polyModLoader?.getSetting(GLOWING_BLOCKS_ID), 10); } catch (_) {}
-        if (!Number.isFinite(glowTargetSetting)) glowTargetSetting = 0;
+      // PML setting is a master on/off — which categories glow and what color each one is stays
+      // in the panel (GLOW_CATEGORIES.length options with independent colors doesn't fit a single
+      // PML dropdown, same reason AO's radius/intensity live in the panel and not as settings).
+      let glowEnabledSetting = this.glowEnabledOverride != null ? this.glowEnabledOverride : 0;
+      if (this.glowEnabledOverride == null) {
+        try { glowEnabledSetting = parseInt(window.polyModLoader?.getSetting(GLOWING_BLOCKS_ID), 10); } catch (_) {}
+        if (!Number.isFinite(glowEnabledSetting)) glowEnabledSetting = 0;
       }
-      if (glowTargetSetting !== this.lastGlowTargetSetting) {
-        this.lastGlowTargetSetting = glowTargetSetting;
-        this.glowTargets.setTarget(glowTargetSetting);
+      if (glowEnabledSetting !== this.lastGlowEnabledSetting) {
+        this.lastGlowEnabledSetting = glowEnabledSetting;
+        this.glowTargets.setEnabled(glowEnabledSetting >= 1);
       }
 
       if (this.carLights) {
@@ -843,10 +864,28 @@ class PolyFX {
     const smokeUnknown = this.smokeMat === undefined;
     let smoke = smokeUnknown ? null : this.smokeMat;
 
+    // Candidate-gathering for glow_targets is the one expensive part here (sampling vertex
+    // colors per geometry) — only do it when we don't already have a validated material.
+    // Confirming the existing one is *still* in use is a cheap reference check done unconditionally
+    // below instead, so a track change (which orphans the old material) gets caught within one
+    // scan without paying the sampling cost every single pass.
+    const glowMat = this.glowTargets ? this.glowTargets.material : null;
+    let glowMatStillUsed = false;
+    const glowCandidatesByMaterial = glowMat ? null : new Map();
+
     scene.traverse((o) => {
       if (o.userData && o.userData.__polyfxOwned) return;
       if (o.isDirectionalLight) { dirLights.push(o); return; }
       if (o.isHemisphereLight) { hemiLights.push(o); return; }
+      if (this.glowTargets && o.isInstancedMesh) {
+        const m = Array.isArray(o.material) ? o.material[0] : o.material;
+        if (glowMat) {
+          if (m === glowMat) glowMatStillUsed = true;
+        } else if (m && m.isMeshLambertMaterial && o.geometry.attributes.color) {
+          if (!glowCandidatesByMaterial.has(m)) glowCandidatesByMaterial.set(m, { material: m, sampleColors: [] });
+          glowCandidatesByMaterial.get(m).sampleColors.push(_sampleDistinctVertexColors(o.geometry));
+        }
+      }
       if (!o.isMesh) return;
       if (isBrakeLightMesh(o)) { const root = rootOf(o, scene); if (root) carRoots.add(root); }
       if (smokeUnknown && !smoke && o.isInstancedMesh && o.material) {
@@ -857,7 +896,10 @@ class PolyFX {
 
     if (this.carLights) this.carLights.ingestRoots(carRoots);
     if (this.sky) this.sky.ingestLights(dirLights, hemiLights, this._scanIsFirst);
-    if (this.glowTargets) this.glowTargets.ingest(scene);
+    if (this.glowTargets) {
+      if (glowMat && !glowMatStillUsed) this.glowTargets.material = null;
+      else if (!glowMat) this.glowTargets.ingestCandidates(Array.from(glowCandidatesByMaterial.values()));
+    }
     if (smokeUnknown) {
       this.smokeMat = smoke || null;
       if (this.smokeMat && !this.smokeMat.userData.__polyfxOrigColor) this.smokeMat.userData.__polyfxOrigColor = this.smokeMat.color.clone();
@@ -953,7 +995,7 @@ class PolyFX {
   setUnderglowOverride(n) { this.underglowOverride = n == null ? null : Number(n); }
   setAoOverride(n) { this.aoOverride = n == null ? null : Number(n); }
   setPerfGuardOverride(n) { this.perfGuardOverride = n == null ? null : Number(n); }
-  setGlowTargetOverride(n) { this.glowTargetOverride = n == null ? null : Number(n); }
+  setGlowEnabledOverride(n) { this.glowEnabledOverride = n == null ? null : Number(n); }
 
   toggleEffect(name, on) {
     switch (name) {
@@ -1215,8 +1257,6 @@ const PANEL_SLIDERS = [
   ['Ray intensity', 'godrays.intensity', 0, 2, 0.01],
   ['Ray exposure', 'godrays.exposure', 0, 0.08, 0.001],
   ['Ray threshold', 'godrays.threshold', 0.3, 6, 0.05],
-  ['Glowing Blocks'],
-  ['Glow intensity', 'glow.intensity', 0, 6, 0.05],
   ['Color Grade'],
   ['Contrast', 'grade.contrast', 0.5, 1.6, 0.01],
   ['Saturation', 'grade.saturation', 0, 2, 0.01],
@@ -1248,7 +1288,7 @@ const PANEL_SLIDERS = [
 
 const PANEL_CSS = `
 .polyfx-panel{position:fixed;top:16px;left:16px;z-index:99999;width:324px;max-height:90vh;overflow-y:auto;display:none;font-family:ForcedSquare,Arial,sans-serif;color:var(--text-color,#fff);background:var(--surface-transparent-color,rgba(33,43,82,.68));border:2px solid var(--surface-color,#28346a);border-radius:8px;padding:12px 14px;box-shadow:0 8px 30px rgba(0,0,0,.55);backdrop-filter:blur(4px);user-select:none}
-.polyfx-panel .pf-header{display:flex;justify-content:space-between;align-items:baseline;font-size:24px;margin-bottom:10px}.polyfx-panel .pf-sub{font-size:14px;color:#9fb0e0}.polyfx-panel .pf-sep{margin:12px 0 4px;font-size:15px;color:#8ea2d6;text-transform:uppercase}.polyfx-panel .pf-row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:5px 0;font-size:17px}.polyfx-panel .pf-btn{font-family:inherit;font-size:15px;color:var(--text-color,#fff);background:var(--button-color,#112052);border:none;border-radius:6px;padding:5px 14px;cursor:pointer;min-width:56px}.polyfx-panel .pf-btn.on{background:#2f63c6}.polyfx-panel .pf-slider{margin:6px 0;font-size:15px}.polyfx-panel .pf-slider .pf-top{display:flex;justify-content:space-between;gap:8px}.polyfx-panel .pf-val{color:#9fd0ff}.polyfx-panel input[type=range]{width:100%;accent-color:#2f63c6;height:4px;margin-top:3px}.polyfx-panel .pf-hint{margin-top:10px;font-size:13px;color:#7f90bd}
+.polyfx-panel .pf-header{display:flex;justify-content:space-between;align-items:baseline;font-size:24px;margin-bottom:10px}.polyfx-panel .pf-sub{font-size:14px;color:#9fb0e0}.polyfx-panel .pf-sep{margin:12px 0 4px;font-size:15px;color:#8ea2d6;text-transform:uppercase}.polyfx-panel .pf-row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:5px 0;font-size:17px}.polyfx-panel .pf-btn{font-family:inherit;font-size:15px;color:var(--text-color,#fff);background:var(--button-color,#112052);border:none;border-radius:6px;padding:5px 14px;cursor:pointer;min-width:56px}.polyfx-panel .pf-btn.on{background:#2f63c6}.polyfx-panel .pf-slider{margin:6px 0;font-size:15px}.polyfx-panel .pf-slider .pf-top{display:flex;justify-content:space-between;gap:8px}.polyfx-panel .pf-val{color:#9fd0ff}.polyfx-panel input[type=range]{width:100%;accent-color:#2f63c6;height:4px;margin-top:3px}.polyfx-panel .pf-hint{margin-top:10px;font-size:13px;color:#7f90bd}.polyfx-panel .pf-row span{flex:1;min-width:0}.polyfx-panel input.pf-color{flex:none;width:28px;height:24px;padding:0;border:1px solid rgba(255,255,255,.3);border-radius:4px;background:none;cursor:pointer}
 `;
 
 class PolyFXPanel {
@@ -1313,12 +1353,71 @@ class PolyFXPanel {
       this.sliders[path] = { input, val, step };
     }
 
+    this._buildGlowSection(el, fx);
+
     const hint = document.createElement('div');
     hint.className = 'pf-hint';
     hint.textContent = 'Press L to close (rebindable in PolyModLoader keybinds). F2 toggles photo mode; F9 saves a PNG.';
     el.appendChild(hint);
     document.body.appendChild(el);
     this.el = el;
+  }
+
+  // GLOW_CATEGORIES.length independently-colored toggles doesn't fit the generic
+  // label+single-button PANEL_TOGGLES rendering (or the generic slider rendering) above, so this
+  // is built directly rather than through those arrays' generic loop.
+  _buildGlowSection(el, fx) {
+    el.appendChild(this._sep('Glowing Blocks'));
+    this.glowEnabledButton = this._buttonRow(el, 'Enabled', () => {
+      const on = !this.glowEnabledButton.classList.contains('on');
+      fx.glowTargets.setEnabled(on);
+      this._setButton(this.glowEnabledButton, on);
+    });
+
+    const intensityRow = document.createElement('div');
+    intensityRow.className = 'pf-slider';
+    const intensityTop = document.createElement('div');
+    intensityTop.className = 'pf-top';
+    const intensityName = document.createElement('span');
+    intensityName.textContent = 'Glow intensity';
+    const intensityVal = document.createElement('span');
+    intensityVal.className = 'pf-val';
+    const intensityInput = document.createElement('input');
+    intensityInput.type = 'range';
+    intensityInput.min = 0; intensityInput.max = 6; intensityInput.step = 0.05;
+    intensityInput.oninput = () => {
+      const v = parseFloat(intensityInput.value);
+      intensityVal.textContent = v.toFixed(2);
+      fx.setParam('glow.intensity', v);
+    };
+    intensityTop.appendChild(intensityName); intensityTop.appendChild(intensityVal);
+    intensityRow.appendChild(intensityTop); intensityRow.appendChild(intensityInput);
+    el.appendChild(intensityRow);
+    this.sliders['glow.intensity'] = { input: intensityInput, val: intensityVal, step: 0.05 };
+
+    this.glowCategoryRows = {};
+    for (const cat of GLOW_CATEGORIES) {
+      const row = document.createElement('div');
+      row.className = 'pf-row';
+      const label = document.createElement('span');
+      label.textContent = cat.label;
+      const color = document.createElement('input');
+      color.type = 'color';
+      color.className = 'pf-color';
+      color.value = cat.defaultGlow;
+      color.oninput = () => fx.glowTargets.setCategoryColor(cat.id, color.value);
+      const button = document.createElement('button');
+      button.className = 'pf-btn';
+      button.textContent = 'OFF';
+      button.onclick = () => {
+        const on = !button.classList.contains('on');
+        fx.glowTargets.setCategoryEnabled(cat.id, on);
+        this._setButton(button, on);
+      };
+      row.appendChild(label); row.appendChild(color); row.appendChild(button);
+      el.appendChild(row);
+      this.glowCategoryRows[cat.id] = { button, color };
+    }
   }
 
   _sep(text) {
@@ -1374,6 +1473,14 @@ class PolyFXPanel {
       if (value == null) continue;
       slider.input.value = value;
       slider.val.textContent = this._format(Number(value), Number(slider.step), path);
+    }
+    if (this.glowEnabledButton) this._setButton(this.glowEnabledButton, this.fx.glowTargets.enabled);
+    for (const id in this.glowCategoryRows) {
+      const row = this.glowCategoryRows[id];
+      const catState = this.fx.glowTargets.categoryState.get(id);
+      if (!catState) continue;
+      this._setButton(row.button, catState.on);
+      row.color.value = '#' + new THREE.Color(catState.glow[0], catState.glow[1], catState.glow[2]).getHexString();
     }
     this.tick();
   }

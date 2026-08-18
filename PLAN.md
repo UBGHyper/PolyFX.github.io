@@ -107,25 +107,47 @@ content authored with no tone mapping in mind. Also exposed as a live-cyclable p
 
 Also: `TimeOfDay` (Default + 7 named times), `Underglow` (Off/On), `AutoPerfGuard` (Off/On, default On).
 
-`GlowingBlocks` (PML `SettingType.CUSTOM`, default `0` = Off, options + implementation in
-`glow_targets.js`) makes one category of track element emissive — e.g. "Warning Signs (Yellow)",
-"Finish Line & Red Track Edges". This does **not** work by grabbing a material named `SignYellow`
-and setting `.emissive` on it, because no such material exists at runtime: every track-part
-InstancedMesh (confirmed at runtime — 36+ distinct geometries, 8+ distinct baked colors) shares
-exactly **one** `MeshLambertMaterial`, with per-part color coming entirely from a baked per-vertex
-`color` attribute (values bit-identical to the source GLTFs' `baseColorFactor`, confirmed by direct
-comparison). Setting `.emissive` on that shared material would light up the *entire track*, not the
-selected part type. Instead `GlowTargets._patch()` hooks the shared material's `onBeforeCompile`
-once, adds `polyfxGlowTarget`/`polyfxGlowColor`/`polyfxGlowIntensity` uniforms, and inserts a
-per-fragment check right after `#include <emissivemap_fragment>` that compares the built-in
-`vColor` varying against the target color (tight epsilon, `0.015`, since some materials — e.g.
-`Finish` and `RoadEdgeRed` — bake to the exact same color and are therefore not distinguishable at
-this level; the setting's option list is honest about that rather than pretending to offer
-per-material granularity the underlying data doesn't have) and adds the glow color there if it
-matches. Selection therefore happens per-vertex at render time against one already-shared material,
-not by swapping/patching per-part materials. Verified against the real game: white and red track
-edges visibly glow when selected (screenshot A/B — same camera, only the target changed), with no
-change when the target's color isn't present in the current view (no false positives).
+`GlowingBlocks` (PML `SettingType.CUSTOM`, default `0` = Off) is a master switch only — *which*
+`GLOW_CATEGORIES` are active and what color each one glows is a tuning-panel section
+(`glow_targets.js` + `PolyFXPanel._buildGlowSection`), not the PML setting, because one PML
+dropdown can't represent 13 independently-toggled, independently-colored entries (same reason AO's
+radius/intensity are panel sliders, not settings). Any combination of categories can be active
+simultaneously, each with its own user-picked `<input type="color">`.
+
+This does **not** work by grabbing a material named `SignYellow` and setting `.emissive` on it,
+because no such material exists at runtime: every track-part InstancedMesh (confirmed at runtime
+— 36+ distinct geometries, 8+ distinct baked colors) shares exactly **one** `MeshLambertMaterial`,
+with per-part color coming entirely from a baked per-vertex `color` attribute (values bit-identical
+to the source GLTFs' `baseColorFactor`, confirmed by direct comparison). Setting `.emissive` on
+that shared material would light up the *entire track*. Instead `GlowTargets._patch()` hooks the
+shared material's `onBeforeCompile` once, adds fixed-size array uniforms
+(`polyfxGlowTargets[16]`/`polyfxGlowColors[16]`/`polyfxGlowCount`/`polyfxGlowIntensity`) and
+inserts a per-fragment loop right after `#include <emissivemap_fragment>` that checks the built-in
+`vColor` varying against each active target color (epsilon `0.02`) and adds that category's glow
+color if it matches.
+
+Several source materials bake to colors too close together to reliably tell apart with a fixed
+epsilon (e.g. `BlockSurface` 0.2079 vs `Pillar` 0.2019 — 0.0104 apart in Euclidean distance) — those
+are merged into one honestly-labeled category (its target color is the cluster's centroid) rather
+than pretending to offer granularity the baked data doesn't support; all 13 entries are cross-checked
+pairwise to confirm they sit outside each other's match epsilon.
+
+**Material detection is validated, not "first match wins forever."** The first version patched
+whichever `MeshLambertMaterial`-with-vertex-colors `InstancedMesh` it found first during a
+one-time scan — which broke in real play two ways: patching something car-related if it happened
+to be traversed first (reported as "glowing cars"), and never re-checking after a track change
+replaced the actual track material, silently leaving the patch on an orphaned, no-longer-rendered
+object. Fixed by scoring each candidate material against how many `GLOW_CATEGORIES` colors its
+sampled vertex colors actually match (the real track material should hit most of them; anything
+else scores 0 or 1 by chance — accept only ≥3), and by cheaply re-verifying every scan
+(`_sharedScan`, ~1/s) that the tracked material is still in use by a live mesh, falling back to a
+fresh (expensive, sampling-based) re-scan only when it isn't — one shared traversal, not a second
+full-tree walk, matching this codebase's existing "one shared per-second scan" discipline.
+Verified against the real game: the detected material has exactly 36 usages (matching the known
+track-part count) and is confirmed not one of the named car materials; two categories enabled
+simultaneously with custom, non-default colors reach the shader uniforms exactly as set and render
+correctly (screenshot: red/white track edges glowing magenta/cyan on request), with the car visibly
+unaffected.
 
 Tire smoke's material gets a color tint each frame (`_applySmokeTint`) rather than any real
 lighting — it's a single `MeshBasicMaterial` shared across every smoke instance (same

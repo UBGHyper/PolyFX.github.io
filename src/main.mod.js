@@ -1,6 +1,5 @@
 import { PolyMod, SettingType } from './vendor/PolyTypes.js';
 import { RENDERER_ACCESS } from './mixin_tokens.js';
-import { GLOW_TARGETS } from './glow_targets.js';
 
 import './runtime.js';
 
@@ -49,10 +48,14 @@ const AUTO_PERF_GUARD_OPTIONS = [
   { title: 'On', value: '1' },
 ];
 
-// Single source of truth is GLOW_TARGETS (glow_targets.js) — the id numbers there are what
-// runtime.js reads back from this exact setting, so option order/values must stay derived from
-// it, not hand-duplicated.
-const GLOWING_BLOCKS_OPTIONS = GLOW_TARGETS.map((t) => ({ title: t.title, value: String(t.id) }));
+// Master on/off only — which of GLOW_CATEGORIES (glow_targets.js) are active and what color each
+// one glows is configured in the tuning panel, not here. A single PML CUSTOM setting is one
+// dropdown; independently-colored multi-select for a growing category list doesn't fit that,
+// same reason AO's radius/intensity are panel sliders rather than settings.
+const GLOWING_BLOCKS_OPTIONS = [
+  { title: 'Off', value: '0' },
+  { title: 'On', value: '1' },
+];
 
 function isTypingTarget() {
   const el = typeof document !== 'undefined' ? document.activeElement : null;
