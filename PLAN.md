@@ -221,11 +221,27 @@ needs live drifting to spawn, which isn't scriptable without driving input.
   render-seam replacement hardcodes. `npm test`'s mixin-token guard turns that from a silent failure
   into a caught one, but only when someone actually runs it against a current game copy — a game
   update still needs a deliberate re-verify + version bump before shipping.
-- **Weather is built but disabled** (`WEATHER_ENABLED = false` in `runtime.js`) — reviving it needs a
-  real fix first, not just flipping the flag: `weather_engine.js`'s `_applySky` does
-  `light.intensity *= lightScale` every frame without ever resetting from a stored base, so intensities
-  decay geometrically toward zero. It only ever looked correct because `SkySystem`'s full-atmosphere
-  relight rewrote them absolutely first each frame, and `envOnly` mode (the default now) doesn't do
-  that. See ROADMAP Phase 3.
+- **Weather is built but disabled** (`WEATHER_ENABLED = false` in `runtime.js`). The originally-diagnosed
+  bug is fixed: `weather_engine.js`'s `_applySky` did `light.intensity *= lightScale` every frame with
+  no reset from a stored base, so intensity decayed geometrically toward zero — it only ever looked
+  correct because `SkySystem`'s full-atmosphere relight (an explicit `TimeOfDay`) resets `.intensity`
+  absolutely every frame *before* weather runs (confirmed via the actual `render()` call order), which
+  masked the bug everywhere except `envOnly` mode (Default time of day — the actual default, so the
+  most commonly-hit case, and the one PLAN.md always meant by "doesn't do that"). Fixed by making
+  weather's own reset conditional on `sky._fullEngaged` — multiply the fresh value sky.js just set
+  when full relight is active (correct, non-compounding since it's fresh every frame), reset from
+  weather's own captured original when it isn't (the case nothing else protects). Verified directly:
+  under sustained heavy storm, light intensity now dims correctly during the transition, then holds
+  exactly steady once cloudCover/storm stop changing, instead of continuing to decay (6 consecutive
+  identical samples across 12+ seconds, vs. visible continued decay before the fix).
+  **The flag stays off regardless** — testing with it flipped on (locally, reverted before shipping)
+  turned up a second, separate, unfixed problem: `RainField`'s rain-line visual renders as wild
+  connected-looking squiggles across the whole frame rather than discrete diagonal streaks, confirmed
+  isolated to the rain-line geometry itself (not the lens shader, not SSR — ruled out individually) via
+  `lines.visible = false`. Not yet diagnosed further: all testing this session runs through SwiftShader
+  software rasterization even with the software-rasterizer *gate* spoofed off, and WebGL line rendering
+  is known to differ meaningfully between software and real-GPU rasterizers, so this could be a
+  testing-environment artifact rather than a bug real players would hit — needs verification on real
+  hardware before spending more effort chasing it blind.
 - Redistribution: this repo ships no game assets. `app_src/` and `extracted/` (built from your own
   legitimate install via `npm run setup:dev`) are gitignored on purpose.

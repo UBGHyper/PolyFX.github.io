@@ -346,10 +346,22 @@ export class WeatherEngine {
     const lightScale = THREE.MathUtils.clamp(1 - s.cloudCover * 0.30 - s.storm * 0.20, 0.52, 1);
     scene.traverse((o) => {
       if (o.userData && o.userData.__polyfxOwned) return;
-      if ((o.isDirectionalLight || o.isHemisphereLight) && !o.userData.__polyfxWeatherBase) {
-        o.userData.__polyfxWeatherBase = o.intensity || 1;
+      if (!(o.isDirectionalLight || o.isHemisphereLight)) return;
+      if (!o.userData.__polyfxWeatherBase) o.userData.__polyfxWeatherBase = o.intensity || 1;
+      if (sky._fullEngaged) {
+        // sky.js's own full relight (an explicit, non-Default time of day) resets .intensity to a
+        // fresh, hour-of-day-correct value earlier this same frame (it runs before weatherEngine
+        // in render()) — multiplying that fresh value once is correct and doesn't compound.
+        o.intensity *= lightScale;
+      } else {
+        // Default time of day (envOnly) — sky.js never touches .intensity here at all, so this is
+        // the only code that does. Nothing else resets it between frames, so *= against the
+        // previous frame's already-scaled value decayed geometrically toward zero (the original
+        // bug — see PLAN.md §5). Resetting from the captured original each frame instead of
+        // compounding on the live value is what sky.js's own relight already does for the other
+        // case, just via its own separately-tracked _origLights map instead of userData.
+        o.intensity = o.userData.__polyfxWeatherBase * lightScale;
       }
-      if (o.isDirectionalLight || o.isHemisphereLight) o.intensity *= lightScale;
     });
   }
 
