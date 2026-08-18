@@ -225,15 +225,26 @@ const GodRaysShader = {
     threshold: { value: 0.9 },
     tint: { value: new THREE.Color(1, 0.92, 0.74) },
     sampleCount: { value: 56 },
+    debugShowThreshold: { value: false },
   },
   vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
   fragmentShader: `
     varying vec2 vUv; uniform sampler2D tDiffuse; uniform vec2 sunPosition;
     uniform float intensity,density,weight,decay,exposure,threshold; uniform vec3 tint;
-    uniform int sampleCount;
+    uniform int sampleCount; uniform bool debugShowThreshold;
     const int MAX_SAMPLES=56;
     void main(){
       vec4 base=texture2D(tDiffuse,vUv);
+      // Shows exactly which pixels count as "bright enough to feed the rays" (linear HDR,
+      // pre-tonemap — see PLAN.md) without the accumulation/smear on top, so a shadow or other
+      // dark-on-screen region that's secretly crossing threshold in linear space is visible
+      // directly instead of only inferred from the smeared result.
+      if(debugShowThreshold){
+        float lum=dot(base.rgb,vec3(0.299,0.587,0.114));
+        float over=smoothstep(threshold,1.0,lum);
+        gl_FragColor=vec4(mix(base.rgb,vec3(0.0,3.0,3.0),over),base.a);
+        return;
+      }
       if(intensity<=0.0){ gl_FragColor=base; return; }
       vec2 tc=vUv;
       vec2 delta=(vUv-sunPosition)*(density/float(sampleCount));
@@ -433,6 +444,7 @@ class PolyFX {
     this.weatherHeadlights = false;
     this.carLightsEnabled = true;
     this.bloomDebugHighlight = false;
+    this.godraysDebug = false;
     this.photo = null;
     this.photoWasActive = false;
     this.sunOverrideScratch = new THREE.Vector3();
@@ -622,6 +634,7 @@ class PolyFX {
       if (this.underglow) this.underglow.update(scene);
 
       if (this.godrays && this.godrays.enabled) this._updateSun(activeCamera, sunDir);
+      else this._updateSunMarker(null, null);
       if (this.panel) this.panel.tick();
       this.composer.render();
       if (this.photo) this.photo.capture(renderer);
@@ -671,6 +684,19 @@ class PolyFX {
     if (!this.underglow && this.carLights) { try { this.underglow = new Underglow(this.carLights); } catch (e) { console.warn('[PolyFX] underglow unavailable:', e); } }
     if (!this.photo && typeof document !== 'undefined') { try { this.photo = new PhotoMode(this); } catch (e) { console.warn('[PolyFX] photo mode unavailable:', e); } }
     if (!this.panel && typeof document !== 'undefined') { try { this.panel = new PolyFXPanel(this); } catch (e) { console.warn('[PolyFX] panel unavailable:', e); } }
+    if (!this._sunMarker && typeof document !== 'undefined') { try { this._installSunMarker(); } catch (e) { console.warn('[PolyFX] sun marker unavailable:', e); } }
+  }
+
+  // Debug-only: shows exactly where GodRaysShader thinks the sun is on screen (the same
+  // sunPosition uniform it samples toward), so a theory about "the rays are radiating from
+  // somewhere they shouldn't" can be confirmed by looking, not inferred from the smeared result.
+  _installSunMarker() {
+    const style = document.createElement('style');
+    style.textContent = `.polyfx-sun-marker{display:none;position:fixed;width:22px;height:22px;margin:-11px 0 0 -11px;border:2px solid #37e6e6;border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,.6);pointer-events:none;z-index:99997}.polyfx-sun-marker::before,.polyfx-sun-marker::after{content:'';position:absolute;background:#37e6e6}.polyfx-sun-marker::before{left:50%;top:-6px;width:2px;height:6px;transform:translateX(-1px)}.polyfx-sun-marker::after{top:50%;left:-6px;width:6px;height:2px;transform:translateY(-1px)}.polyfx-sun-marker.on{display:block}`;
+    document.head.appendChild(style);
+    this._sunMarker = document.createElement('div');
+    this._sunMarker.className = 'polyfx-sun-marker';
+    document.body.appendChild(this._sunMarker);
   }
 
   _ensureSSR(renderer, scene, camera) {
@@ -840,7 +866,7 @@ class PolyFX {
   _updateSun(camera, sunDir) {
     const u = this.godrays.material.uniforms;
     const dir = this.skyActive && !this.envOnly && this.sky ? this.sky.getSunDir() : sunDir;
-    if (!dir) { u.intensity.value = 0; return; }
+    if (!dir) { u.intensity.value = 0; this._updateSunMarker(null, null); return; }
     this.sunOverrideScratch.copy(dir).normalize().multiplyScalar(5000).add(camera.position).project(camera);
     const sx = this.sunOverrideScratch.x * 0.5 + 0.5;
     const sy = this.sunOverrideScratch.y * 0.5 + 0.5;
@@ -852,6 +878,18 @@ class PolyFX {
       fade = Math.max(0, 1 - (mx + my) / 0.4);
     }
     u.intensity.value = this.godraysStrength * fade;
+    this._updateSunMarker(sx, sy);
+  }
+
+  _updateSunMarker(sx, sy) {
+    if (!this._sunMarker) return;
+    if (!this.godraysDebug || sx == null) { this._sunMarker.classList.remove('on'); return; }
+    this._sunMarker.classList.add('on');
+    // sunPosition is GL-convention UV (y=1 at the top); the marker is positioned in DOM/viewport
+    // space (y=0 at the top), and the canvas fills the viewport, so this flip is the only
+    // conversion needed — no separate NDC step, sx/sy are already normalized [0,1].
+    this._sunMarker.style.left = (sx * 100) + '%';
+    this._sunMarker.style.top = ((1 - sy) * 100) + '%';
   }
 
   _trackFrameTime() {
@@ -904,6 +942,11 @@ class PolyFX {
       case 'bloomDebug':
         this.bloomDebugHighlight = on;
         if (this.bloom) this.bloom.highPassUniforms['debugHighlightNonFinite'].value = on;
+        break;
+      case 'godraysDebug':
+        this.godraysDebug = on;
+        if (this.godrays) this.godrays.material.uniforms.debugShowThreshold.value = on;
+        if (!on) this._updateSunMarker(null, null);
         break;
     }
   }
@@ -1002,6 +1045,7 @@ class PolyFX {
         photo: !!(this.photo && this.photo.active),
         lightning: !!this.weather.lightning,
         bloomDebug: this.bloomDebugHighlight,
+        godraysDebug: this.godraysDebug,
       },
       params: {
         'weather.preset': this.weather.preset,
@@ -1086,6 +1130,7 @@ const PANEL_TOGGLES = [
   ...(WEATHER_ENABLED ? [['lightning', 'Lightning']] : []),
   ['Debug'],
   ['bloomDebug', 'Highlight Bloom Overflow (magenta)'],
+  ['godraysDebug', 'God Ray Sun Position + Threshold (cyan)'],
 ];
 const PANEL_SLIDERS = [
   ...(WEATHER_ENABLED ? [

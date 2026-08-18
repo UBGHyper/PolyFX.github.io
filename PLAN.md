@@ -148,6 +148,16 @@ Also: `TimeOfDay` (Default + 7 named times), `Underglow` (Off/On), `AutoPerfGuar
   `debugHighlightNonFinite` uniform (panel: "Highlight Bloom Overflow") that renders caught pixels as
   a large finite magenta value instead of zero so the problem region is visible on screen rather than
   just suppressed.
+- **God rays are next suspected of the same class of bug** (a shadow-map pattern smearing into a
+  wedge, reported separately from the bloom black box) — `GodRaysShader`'s radial sampler clamps
+  off-screen rays to the nearest edge pixel and re-samples it repeatedly, and its threshold check
+  runs on the same pre-tonemap linear HDR as bloom's, so a dark-looking (post-tonemap) shadow can
+  still cross threshold in linear space. Not yet confirmed or fixed — 1.1.3 ships only the diagnostic
+  tooling: a `godraysDebug` panel toggle draws a crosshair at the shader's actual `sunPosition` (a
+  `.polyfx-sun-marker` DOM overlay, updated from `_updateSun()`) and switches the pass to a
+  `debugShowThreshold` mode that tints any above-threshold pixel cyan instead of accumulating rays,
+  so both halves of the hypothesis — "is the sun projecting near the car" and "is the shadow really
+  crossing threshold" — are visible directly instead of inferred.
 - **Off provably costs nothing**: `_ensure()` (which builds the composer/sky/car-lights/underglow) is
   never called at all while the preset stays Off — not "disabled," never constructed.
   `test/stock-safety.test.mjs` asserts this directly.
